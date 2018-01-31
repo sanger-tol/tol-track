@@ -1,0 +1,429 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2021 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use Carp;
+use DBI;
+
+my $opts = parse_params();
+update_pacbio_tracking($opts);
+
+exit;
+
+#--------------------------------
+
+sub error
+{
+    my (@msg) = @_;
+    if ( scalar @msg ) { confess @msg; }
+    die
+        "\nAbout: Update tracking information for PacBio\n",
+        "Usage: tolqc-update_pacbio\n",
+        "\n";
+}
+
+
+sub parse_params
+{
+    my $opts = {
+        root => '',
+        label => '',
+        email => '',
+        mlims => 1,
+        baton => 1,
+        baton_metaquery => '/software/npg/current/bin/baton-metaquery',
+        baton2tsv => '/nfs/users/nfs_s/sm15/scripts/baton2tsv',
+        samtools => '/software/singularity-v3.6.4/bin/singularity exec -B /lustre:/lustre /software/tola/images/htstools-1.10.2.sif samtools'
+    };
+    while (defined(my $arg=shift(@ARGV)))
+    {
+        if ( $arg eq '-r' || $arg eq '--root' ) { $$opts{root} = shift(@ARGV); next; }
+        elsif ( $arg eq '-l' || $arg eq '--label' ) { $$opts{label} = shift(@ARGV); next; }
+        elsif ( $arg eq '-e' || $arg eq '--email' ) { $$opts{email} = shift(@ARGV); next; }
+        elsif (                 $arg eq '--no-mlims' ) { $$opts{mlims} = 0; next; }
+        elsif (                 $arg eq '--no-baton' ) { $$opts{baton} = 0; next; }
+        elsif ( $arg eq '-?' || $arg eq '-h' || $arg eq '--help' ) { error(); }
+        else { error("Unknown option $arg"); }
+    }
+    $$opts{root} = "$ENV{TOLQCROOT}" if (exists $ENV{TOLQCROOT});
+    error("--root [$$opts{root}] and --label [$$opts{label}] must be set") unless ($$opts{root} && $$opts{label});
+    $$opts{base}=qq[$$opts{root}/track/$$opts{label}_pacbio_data];
+    $$opts{ignore} = read_list(qq[$$opts{base}.fofn.ignore]);
+    $$opts{conf} = load_config($opts);
+    $$opts{studies} = join('","', sort keys %{$$opts{conf}});
+    return $opts;
+}
+
+sub update_pacbio_tracking
+{
+    my ($opts) = @_;
+    update_mlims($opts) if ($$opts{mlims});
+    update_baton($opts) if ($$opts{baton});
+    update_tracking_info($opts);
+}
+
+sub load_config
+{
+    my ($opts) = @_;
+    my $conf = qq[$$opts{root}/track/$$opts{label}_track.conf];
+    unless (-s $conf)
+    {
+        die(qq[Expected config file does not exist [$conf]]);
+    }
+    my $res;
+    open(my $fh, "<$conf") || die("Could not open file for reading [$conf]");
+    while(<$fh>)
+    {
+        chomp;
+        my ($id,$subdir,$study) = split /\t/;
+        $$res{$id} = { subdir => "$subdir", study => "$study" };
+    }
+    close($fh);
+    return $res;
+}
+
+sub update_mlims
+{
+    my ($opts) = @_;
+
+    die("Environment variable MLIMS_DATABASE not set") unless (exists $ENV{MLIMS_DATABASE});
+
+    my $studies = $$opts{studies};
+    my $cmd = qq[mysql --login-path=mlims $ENV{MLIMS_DATABASE} -e '
+SELECT DISTINCT
+    sample.name,
+    sample.supplier_name,
+    sample.accession_number,
+    sample.public_name,
+    sample.donor_id,
+    sample.taxon_id,
+    sample.common_name,
+    sample.description,
+    smrtcell.tag_identifier,
+    smrtcell.tag_sequence,
+    smrtcell.plate_barcode,
+    smrtcell.pac_bio_run_name,
+    smrtcell.well_label,
+    study.id_study_lims as study_id,
+    study.name as study_name
+
+FROM mlwarehouse.sample
+
+JOIN (mlwarehouse.pac_bio_run as smrtcell,
+      mlwarehouse.study as study)
+
+ON (smrtcell.id_sample_tmp = sample.id_sample_tmp
+    AND smrtcell.id_study_tmp = study.id_study_tmp)
+
+WHERE study.id_study_lims in ( "$studies" );'];
+
+    my $mlims = qq[$$opts{base}.lims.tsv];
+    open(my $fh, ">$mlims.part") || die("Could not open file for writing [$mlims.part]");
+    open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
+    while(<$sqh>)
+    {
+        # some hackery here to deal with legacy run IDs; not entirely necessary,
+        # but helps make it clear and be consistent with more recent formatting
+        s/TRACTION_RUN_9/TRACTION-RUN-9/;
+        s/RUN(\d)/RUN-$1/;
+        my @F = split /\t/;
+        $F[11]="TRACTION-RUN-$F[11]" if ($F[11]=~/^(\d+)$/ && $F[11]<1000);
+        print $fh join("\t", @F);
+    }
+    close($sqh);
+    close($fh);
+    # clean up $mlims.part file if identical
+    system(qq[cmp --silent $mlims $mlims.part && rm $mlims.part]) if (-s qq[$mlims.part]);
+}
+
+
+sub update_baton
+{
+    my ($opts) = @_;
+    my $studies = $$opts{studies};
+    my $jq = qq[jq -n '{"collection":"/seq", "avus": [{"attribute": "study_id", "value": [ "$studies" ], "operator": "in"},{"attribute": "cell_index", "value": "\%", "operator": "like"},{"attribute": "type", "value": "bam"}]}'];
+    system(qq[$jq | $$opts{baton_metaquery} --avu > $$opts{base}.json.part]);
+}
+
+sub load_tracking_info
+{
+    my ($opts) = @_;
+    my $info = {};
+    return $info unless (-s qq[$$opts{base}.fofn]);
+    open(my $fh, "<$$opts{base}.fofn") || die("Could not open file for reading [$$opts{base}.fofn]");
+    while(<$fh>)
+    {
+        chomp;
+        my ($bam, @F) = split /\t/;
+        next if (exists $$opts{ignore}{$bam});
+        my $movie = pop @F;
+        $$info{$bam}{info} = join("\t", @F);
+        $$info{$bam}{movie} = $movie;
+    }
+    close($fh);
+    return $info;
+}
+
+sub load_imported_movies
+{
+    my ($opts) = @_;
+    my $movies = {};
+    open(my $fh, qq[for file in `ls $ENV{TOLQCROOT}/data/*/*/*/genomic_data/*/pacbio/*.bam`; do echo \$(basename \$file) | cut -f1 -d"."; done |]) || die("Could not open list movies");
+    while(<$fh>)
+    {
+        chomp;
+        $$movies{$_} = 1;
+    }
+    close($fh);
+    return $movies;
+}
+
+sub update_tracking_info
+{
+    my ($opts) = @_;
+    my $info = load_tracking_info($opts);
+    my $imported = load_imported_movies($opts);
+    my $new;
+    my $diff;
+    my $wh2;
+    my $fields = q[sample_public_name,sample_common_name,sample_supplier_name,sample,run,well,sample_accession_number,study_id,study,md5];
+    my $json = -s qq[$$opts{base}.json.part] ? qq[$$opts{base}.json.part] : qq[$$opts{base}.json];
+    open(my $fh, "$$opts{baton2tsv} -c $fields $json |") || die("Could not open file for reading [$json]");
+    while(<$fh>)
+    {
+        chomp;
+        next if (/scraps/ || /removed/ || /^Binary/);
+        my ($bam, @F) = split /\t/;
+        next if (exists $$opts{ignore}{$bam});
+        unless ($F[0])
+        {
+            if ($F[8] =~ /BAdASS/)
+            {
+                $F[0] = $F[2] if ($F[2]);
+            }
+            unless ($F[0])
+            {
+                my @wh_info = get_wh_sample_info($F[3]);
+                $$wh2{$bam}{info} = 1;
+                if ($wh_info[0]) { $F[0] = $wh_info[0] unless ($F[0]); }
+                if ($wh_info[1]) { $F[1] = $wh_info[1] unless ($F[1]); }
+                if ($wh_info[2]) { $F[2] = $wh_info[2] unless ($F[2]); }
+            }
+        }
+        my $current_info = join("\t", @F);
+        if (exists $$info{$bam})
+        {
+            unless ($current_info eq $$info{$bam}{info})
+            {
+                $$diff{$bam} = qq[OLD:\t$bam\t$$info{$bam}{info}\nNEW:\t$bam\t$current_info\n];
+            }
+            $$info{$bam}{info} = $current_info;
+        }
+        else
+        {
+            my $movie = pbbam2movie($opts, $bam);
+            unless ($bam =~ m/subreads/ || exists $$imported{$movie})
+            {
+                $$new{$bam}{info} = $current_info;
+                $$new{$bam}{movie} = $movie;
+            }
+            $$info{$bam}{info} = $current_info;
+            $$info{$bam}{movie} = $movie;
+        }
+        if (exists $$wh2{$bam})
+        {
+            $$wh2{$bam}{info} = $$info{$bam}{info};
+            $$wh2{$bam}{movie} = $$info{$bam}{movie} if (exists $$info{$bam}{movie});
+        }
+    }
+    close($fh);
+    if ($wh2)
+    {
+        write_info_to_file($wh2,"$$opts{base}.fofn.missing_metadata");
+    }
+    if ($diff)
+    {
+        open(my $fh, ">$$opts{base}.fofn.diff") || die("Could not write to file [$$opts{base}.fofn.diff]");
+        foreach my $bam (sort keys %$diff)
+        {
+            print $fh qq[$$diff{$bam}];
+        }
+        close($fh);
+        my $diff_txt = `cut -f1,3- $$opts{base}.fofn.diff`;
+        send_email($$opts{email},"modified metadata for $$opts{label} PacBio data in iRODS", $diff_txt) if ($$opts{email});
+    }
+    else
+    {
+        system(qq[rm -f $$opts{base}.fofn.diff]) if (-e "$$opts{base}.fofn.diff");
+    }
+    if ($new)
+    {
+        write_info_to_file($new,"$$opts{base}.fofn.new");
+        my $new_txt = '';
+        foreach my $id (keys %{$$opts{conf}})
+        {
+            next unless (`awk -F"\\t" '\$9==$id' $$opts{base}.fofn.new | grep demul`);
+            $new_txt .= qq[new PacBio data for '$$opts{conf}{$id}{study} ($id)'. Import with:\n\n`awk -F"\\t" '\$9==$id' $$opts{base}.fofn.new | wr-import-pacbio-ccs -r \$TOLQCROOT/data -g '$$opts{conf}{$id}{subdir}' | wr add`\n\n];
+            $new_txt .= `awk -F"\\t" '\$9==$id' $$opts{base}.fofn.new | cut -f2-5,10 | sort`;
+            $new_txt .= qq[\n];
+        }
+        send_email($$opts{email}, "new $$opts{label} PacBio data in iRODS", $new_txt) if ($new_txt && $$opts{email});
+    }
+    else
+    {
+        system(qq[rm -f $$opts{base}.fofn.new]) if (-e "$$opts{base}.fofn.new");
+    }
+    if ($new || $diff)
+    {
+        write_info_to_file($info,"$$opts{base}.fofn.part");
+    }
+    system(qq[cmp --silent $$opts{base}.fofn $$opts{base}.fofn.part && rm $$opts{base}.fofn.part]) if (-s qq[$$opts{base}.fofn.part]);
+    system(qq[cmp --silent $$opts{base}.json $$opts{base}.json.part && rm $$opts{base}.json.part]) if (-s qq[$$opts{base}.json.part]);
+    # if (-s qq[$$opts{base}.fofn.part])
+    # {
+    #     system(qq[grep subreads $$opts{base}.fofn.part | wr-smrt-report]);
+    # }
+}
+
+sub write_info_to_file
+{
+    my ($info,$file) = @_;
+    open(my $fh, ">$file") || die("Could not write to file [$file]");
+    foreach my $bam (sort keys %$info)
+    {
+        print $fh qq[$bam\t$$info{$bam}{info}];
+        print $fh qq[\t$$info{$bam}{movie}] if (exists $$info{$bam}{movie});
+        print $fh qq[\n];
+    }
+    close($fh);
+}
+
+sub send_email
+{
+    my ($email, $subject, $msg) = @_;
+    open(my $mh,"| /usr/bin/mutt -s '$subject' $email");
+    print $mh "$msg\n";
+    close($mh);
+}
+
+sub get_wh_sample_info
+{
+    my ($sample) = @_;
+    unless (exists $ENV{WAREHOUSE_DATABASE} && exists $ENV{WAREHOUSE_HOST} && exists $ENV{WAREHOUSE_PORT} && exists $ENV{WAREHOUSE_USER})
+    {
+        die("WAREHOUSE environment variables must be set");
+    }
+    my $dbh = DBI->connect(qq[DBI:mysql:$ENV{WAREHOUSE_DATABASE};host=$ENV{WAREHOUSE_HOST};port=$ENV{WAREHOUSE_PORT}],qq[$ENV{WAREHOUSE_USER}]) or die($DBI::errstr);
+    my $qh = $dbh->prepare("select public_name,common_name,supplier_name from current_samples where name = ?");
+    $qh->execute($sample) or die($DBI::errstr);
+    my @row = ('','','');
+    @row = $qh->fetchrow_array();
+    if (@row)
+    {
+        @row = map { defined $_ ? $_ : '' } @row;
+    }
+    return @row;
+}
+
+sub pbbam2movie
+{
+    my ($opts,$bam) = @_;
+    my $rg = `$$opts{samtools} view -H irods:$bam | grep ^\@RG`;
+    my ($movie) = $rg =~ m/PU:(\S+)/;
+    return $movie;
+}
+
+sub read_list
+{
+    my ($file) = @_;
+    return {} unless (-s $file);
+    my $list;
+    open(my $fh, "<$file") || die("Could not read from file [$file]");
+    while(<$fh>)
+    {
+        chomp;
+        $$list{$_} = 1;
+    }
+    close($fh);
+    return $list;
+}
+
+sub baton2tsv
+{
+    my ($opts) = @_;
+    $$opts{keys} = get_all_keys($opts) unless (exists $$opts{keys});
+    if ($$opts{header})
+    {
+        print "irods_path";
+        foreach my $key (@{$$opts{keys}})
+        {
+            print "\t$key";
+        }
+        print "\n";
+    }
+    foreach my $rec (@{$$opts{records}})
+    {
+        print "$$rec{collection}/$$rec{data_object}";
+        foreach my $key (@{$$opts{keys}})
+        {
+            print "\t";
+            my $found = 0;
+            foreach my $avu (@{$$rec{avus}})
+            {
+                if ($$avu{attribute} eq $key)
+                {
+                    print "," if $found;
+                    print "$$avu{value}";
+                    $found = 1;
+                }
+            }
+        }
+        print "\n";
+    }
+}
+
+sub get_all_keys
+{
+    my ($opts) = @_;
+    my %keys;
+    foreach my $rec (@{$$opts{records}})
+    {
+        foreach my $avu (@{$$rec{avus}})
+        {
+            $keys{$$avu{attribute}} = 1;
+        }
+    }
+    return [ sort keys %keys ];
+}
+
+sub list_keys
+{
+    my ($opts) = @_;
+    my $keys = get_all_keys($opts);
+    foreach my $key (@$keys)
+    {
+        print "$key\n";
+    }
+}

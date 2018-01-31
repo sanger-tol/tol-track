@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#
+#    Copyright (C) 2020 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#            (base on examples from Carol Scott)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+export PATH=${SMRTPATH}:${PATH}
+
+smrtdir=$(dirname $1)
+smrtfile=$(basename $1)
+movie=${smrtfile/.subreads.bam/}
+
+wd=${TOLQCROOT}/$smrtdir
+mkdir -p $wd
+cd $wd
+
+# setup requires input data (bams must exist but are not used - so can be empty files)
+if [[ ! -f $movie.adapters.fasta ]]; then
+    iget -Kf $smrtdir/$movie.adapters.fasta
+fi
+if [[ ! -f $movie.subreadset.xml ]]; then
+    iget -Kf $smrtdir/$movie.subreadset.xml
+fi
+if [[ ! -f $movie.sts.xml ]]; then
+    iget -Kf $smrtdir/$movie.sts.xml
+fi
+if [[ ! -f $movie.subreads.bam.pbi ]]; then
+    iget -Kf $smrtdir/$movie.subreads.bam.pbi
+fi
+if [[ ! -f $smrtdir/$movie.scraps.bam.pbi ]]; then
+    iget -Kf $smrtdir/$movie.scraps.bam.pbi
+fi
+if [[ ! -f $movie.subreads.bam ]]; then
+    touch $movie.subreads.bam
+fi
+if [[ ! -f $movie.scraps.bam ]]; then
+    touch $movie.scraps.bam
+fi
+
+# create local xml
+mkdir -p input
+dataset  --skipCounts --log-level INFO absolutize $movie.subreadset.xml --outdir input
+
+# create output directories for reports and plots
+mkdir -p reports
+
+# run loading report
+python3 -m pbreports.report.loading_xml --log-level INFO --optional input/$movie.subreadset.xml reports/loading.report.json
+
+# run adapter report
+python3 -m pbreports.report.adapter_xml --log-level INFO --optional input/$movie.subreadset.xml reports/adapter.report.json
+
+# run raw data report (reads pbi file)
+python3 -m pbreports.report.filter_stats_xml --log-level INFO --optional input/$movie.subreadset.xml reports/raw_data.report.json
+
+# run control report
+python3 -m pbreports.report.control  --log-level INFO  --optional input/$movie.subreadset.xml reports/control.report.json
+
+# cleanup
+rm -r input
+rm -f $movie.adapters.fasta $movie.subreads.bam $movie.subreads.bam.pbi $movie.scraps.bam $movie.scraps.bam.pbi

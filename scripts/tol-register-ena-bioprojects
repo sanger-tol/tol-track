@@ -1,0 +1,166 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2021 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#            based on existing code from the Vertebrate Resequencing team
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+no warnings 'uninitialized';
+use XML::Simple;
+use Data::Dumper;
+use Getopt::Long;
+
+my ($file_prefix, $help, $spp,$verbose,$skip_test, $skip_live);
+
+GetOptions(
+    'p|prefix=s'  =>  \$file_prefix,
+    'v|verbose'   =>  \$verbose,
+    'n|no_test'   =>  \$skip_test,
+    'l|no_live'   =>  \$skip_live,
+    'h|help'      =>  \$help,
+    );
+
+
+my $prjfile     = "$file_prefix.xml";
+my $subfile     = "$file_prefix.submission.xml";
+
+(-f $subfile && -f $prjfile && !$help) or die <<USAGE;
+    Usage: $0
+                --prefix    <file prefix to submission files>
+                [--no_test  <skip test submission, just submit live>
+                [--no_live  <skip live submission, just test>
+                [--verbose  <verbose output>]
+                [--help     <this message>]
+
+Submits submission and study XMLs to ENA.
+
+First submits to the test instance to check if the submission is valid, and
+only if so does it submit to the live instance and update the database.  This
+behaviour can be disabled by --no_test; you probably only want to do this if
+you have already sent the submission to the test server and now it will fail
+due to the submission existing already.
+
+USAGE
+
+# environment for curl
+$ENV{HTTP_PROXY} = "http://webcache.sanger.ac.uk:3128";
+$ENV{HTTPS_PROXY} = "http://webcache.sanger.ac.uk:3128";
+my $test_url = 'https://wwwdev.ebi.ac.uk/ena/submit/drop-box/submit/';
+my $live_url = 'https://www.ebi.ac.uk/ena/submit/drop-box/submit/';
+
+my $xmlhash;
+
+# Make test submission
+if ($skip_test)
+{
+    print "Skipping test submission.\n";
+}
+else
+{
+    print "Making test submission...\n";
+    $xmlhash = make_submission($subfile, $prjfile, $test_url, "$file_prefix.receipt.xml.test");
+
+    if (submission_was_successful($xmlhash))
+    {
+        print "ENA test submission of study successful.\n";
+    }
+    else
+    {
+        print "ENA test submission of study failed.\n";
+        print join "\n", @{$xmlhash->{MESSAGES}->[0]->{ERROR}},"\n";
+        exit 1;
+    }
+}
+
+# Make live submission
+if ($skip_live)
+{
+    print "Skipping real submission.\n";
+    exit;
+}
+else
+{
+    print "Making real submission...\n";
+    $xmlhash = make_submission($subfile, $prjfile, $live_url, "$file_prefix.receipt.xml");
+
+    unless (submission_was_successful($xmlhash))
+    {
+        print "ENA submission failed\n";
+        print join "\n", @{$xmlhash->{MESSAGES}->[0]->{ERROR}},"\n";
+        exit 1;
+    }
+}
+
+my($submission_alias, $submission_acc, $project_acc) = get_submission_alias_acc_from_xml($xmlhash);
+
+print "ENA submission was successful:\t$submission_alias\t$submission_acc\t$project_acc\n";
+
+###############################################################################
+
+sub make_submission
+{
+    my ($subfile, $prjfile, $url, $dumpfile) = @_;
+    my $cmd = qq(curl -u $ENV{TOLDATAHOSE_USER}:$ENV{TOLDATAHOSE_PASS} -s -k -F "SUBMISSION=\@$subfile" -F "PROJECT=\@$prjfile" '$url');
+    print "$cmd\n" if $verbose;
+    my $DUMPFILE;
+    if ($dumpfile)
+    {
+        open $DUMPFILE, ">$dumpfile" or die "Can't open $dumpfile for writing: $!\n";
+    }
+
+    my $xmlhash;
+    eval
+    {
+        my $content = `$cmd`;
+        if ($dumpfile)
+        {
+            print $DUMPFILE "$content\n";
+            close $DUMPFILE;
+        }
+        my $xml = XML::Simple->new(KeyAttr => [], ForceArray=>1);
+        $xmlhash = $xml->XMLin($content);
+    };
+    if ($@)
+    {
+        die "[[XML ERROR]] $cmd: $@\n";
+    }
+    return $xmlhash;
+}
+
+sub submission_was_successful
+{
+    my $xml = shift;
+    my $success = $xml->{'success'};
+    die("Can't retrieve submission success\n") unless defined $success;
+    return $success eq 'true' ? 1 : 0;
+}
+
+sub get_submission_alias_acc_from_xml
+{
+    my $xml = shift;
+    my $submission_alias = $xml->{SUBMISSION}->[0]->{'alias'};
+    my $submission_acc = $xml->{SUBMISSION}->[0]->{'accession'};
+    my $project_acc = $xml->{PROJECT}->[0]->{'accession'};
+    die("Can't retrieve submission info\n") unless ($submission_alias && $submission_acc && $project_acc);
+    return ($submission_alias, $submission_acc, $project_acc);
+}
