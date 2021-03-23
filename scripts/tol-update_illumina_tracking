@@ -192,11 +192,20 @@ sub load_tracking_info
     return $info;
 }
 
+sub load_already_imported
+{
+    my ($opts) = @_;
+    system(qq[cat $$opts{root}/data/*/*/*/genomic_data/*/*/IRODS*.fofn | grep -v pacbio | grep -v lustre > $$opts{base}.imported]);
+    system(qq[cat $$opts{root}/data/*/*/*/transcriptomic_data/*/*/IRODS*.fofn | grep -v pacbio | grep -v lustre >> $$opts{base}.imported]);
+    my $imported = read_list(qq[$$opts{base}.imported]);
+    return $imported;
+}
+
 sub update_tracking_info
 {
     my ($opts) = @_;
     my $info = load_tracking_info($opts);
-    # my $imported = read_list(qq[$$opts{base}.fofn]);
+    my $imported = load_already_imported($opts);
     my $new;
     my $diff;
     my $wh2;
@@ -214,13 +223,15 @@ sub update_tracking_info
             {
                 $F[0] = $F[4] unless ($F[4] eq 'NULL');
             }
-            if ($F[0] eq 'NULL')
+            if ($F[0] eq 'NULL' || $F[5] !~ /^SAM/)
             {
                 my @wh_info = get_wh_sample_info($F[3]);
                 $$wh2{$bam}{info} = 1;
                 if ($wh_info[0]) { $F[0] = $wh_info[0] unless ($F[0] ne 'NULL'); }
                 if ($wh_info[1]) { $F[1] = $wh_info[1] unless ($F[1] ne 'NULL'); }
                 if ($wh_info[2]) { $F[4] = $wh_info[2] unless ($F[4] ne 'NULL'); }
+                if ($wh_info[3]) { $F[5] = $wh_info[3] unless ($F[5] ne 'NULL'); }
+                if ($wh_info[4]) { $F[6] = $wh_info[4] unless ($F[6] ne 'NULL'); }
             }
         }
         my $current_info = join("\t", @F);
@@ -233,7 +244,7 @@ sub update_tracking_info
         }
         else
         {
-            $$new{$bam}{info} = $current_info;
+            $$new{$bam}{info} = $current_info unless (exists $$imported{$bam});
         }
         $$info{$bam}{info} = $current_info;
         if (exists $$wh2{$bam})
@@ -269,7 +280,7 @@ sub update_tracking_info
         {
             next unless (`awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new`);
             $new_txt .= qq[new Illumina data for '$$opts{conf}{$id}{study} ($id)'. Import with:\n\n`awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new | wr-import-hic -r \$TOLQCROOT/data -g '$$opts{conf}{$id}{subdir}' | wr add`\n\n];
-            $new_txt .= `awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new | cut -f2-5,20 | sort`;
+            $new_txt .= `awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new | cut -f2-5,20 | sort | uniq`;
             $new_txt .= qq[\n];
         }
         send_email($$opts{email}, "new $$opts{label} Illumina data in iRODS", $new_txt) if ($new_txt && $$opts{email});
@@ -315,7 +326,7 @@ sub get_wh_sample_info
         die("WARHOUSE environment variables must be set");
     }
     my $dbh = DBI->connect(qq[DBI:mysql:$ENV{WAREHOUSE_DATABASE};host=$ENV{WAREHOUSE_HOST};port=$ENV{WAREHOUSE_PORT}],qq[$ENV{WAREHOUSE_USER}]) or die($DBI::errstr);
-    my $qh = $dbh->prepare("select public_name,common_name,supplier_name from current_samples where name = ?");
+    my $qh = $dbh->prepare("select public_name,common_name,supplier_name,accession_number,donor_id from current_samples where name = ?");
     $qh->execute($sample) or die($DBI::errstr);
     my @row = ('','','');
     @row = $qh->fetchrow_array();

@@ -230,6 +230,7 @@ sub update_tracking_info
                 if ($wh_info[0]) { $F[0] = $wh_info[0] unless ($F[0]); }
                 if ($wh_info[1]) { $F[1] = $wh_info[1] unless ($F[1]); }
                 if ($wh_info[2]) { $F[2] = $wh_info[2] unless ($F[2]); }
+                if ($wh_info[4]) { $F[7] = $wh_info[4] unless ($F[7]); }
             }
         }
         my $current_info = join("\t", @F);
@@ -336,7 +337,7 @@ sub get_wh_sample_info
         die("WAREHOUSE environment variables must be set");
     }
     my $dbh = DBI->connect(qq[DBI:mysql:$ENV{WAREHOUSE_DATABASE};host=$ENV{WAREHOUSE_HOST};port=$ENV{WAREHOUSE_PORT}],qq[$ENV{WAREHOUSE_USER}]) or die($DBI::errstr);
-    my $qh = $dbh->prepare("select public_name,common_name,supplier_name from current_samples where name = ?");
+    my $qh = $dbh->prepare("select public_name,common_name,supplier_name,accession_number,donor_id from current_samples where name = ?");
     $qh->execute($sample) or die($DBI::errstr);
     my @row = ('','','');
     @row = $qh->fetchrow_array();
