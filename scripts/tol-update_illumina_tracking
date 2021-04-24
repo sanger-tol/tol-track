@@ -146,14 +146,27 @@ ON (flowcell.id_sample_tmp = sample.id_sample_tmp
 
 WHERE study.id_study_lims in ( "$studies" ) AND run_status.iscurrent = 1;'];
 
-    my $mlims = qq[$$opts{base}.lims.tsv];
-    open(my $fh, ">$mlims.part") || die("Could not open file for writing [$mlims.part]");
+    my %runs;
     open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
     while(<$sqh>)
     {
         next if /public_name/;
         # awk -F"\t" 'BEGIN{OFS="\t"}$10~/HiSeq/{print "/seq/"$11"/"$11"_"$12"#"$13".cram\t"$0} $10~/NovaSeq/{col=substr($11,0,2); print "/seq/illumina/runs/"col"/"$11"/lane"$12"/plex"$13"/"$11"_"$12"#"$13".cram\t"$0
         my @F = split /\t/;
+        my $label = "$F[3].$F[9].$F[10].$F[12]";
+        if ($F[9] =~ /NovaSeq/ && exists $runs{"$label"})
+        {
+            $F[11] = 'NULL';
+        }
+        $runs{"$label"} = \@F;
+    }
+    close($sqh);
+
+    my $mlims = qq[$$opts{base}.lims.tsv];
+    open(my $fh, ">$mlims.part") || die("Could not open file for writing [$mlims.part]");
+    foreach my $val (values %runs)
+    {
+        my @F = @$val;
         if ($F[9] =~ /[HM]iSeq/)
         {
             unshift @F, qq[/seq/$F[10]/$F[10]_$F[11]#$F[12].cram];
@@ -161,7 +174,14 @@ WHERE study.id_study_lims in ( "$studies" ) AND run_status.iscurrent = 1;'];
         elsif ($F[9] =~ /NovaSeq/)
         {
             my $col = substr($F[10], 0, 2);
-            unshift @F, qq[/seq/illumina/runs/$col/$F[10]/lane$F[11]/plex$F[12]/$F[10]_$F[11]#$F[12].cram];
+            if ($F[11] eq 'NULL')
+            {
+                unshift @F, qq[/seq/illumina/runs/$col/$F[10]/plex$F[12]/$F[10]#$F[12].cram];
+            }
+            else
+            {
+                unshift @F, qq[/seq/illumina/runs/$col/$F[10]/lane$F[11]/plex$F[12]/$F[10]_$F[11]#$F[12].cram];
+            }
         }
         else
         {
@@ -171,6 +191,7 @@ WHERE study.id_study_lims in ( "$studies" ) AND run_status.iscurrent = 1;'];
     }
     close($sqh);
     close($fh);
+
     # clean up $mlims.part file if identical
     system(qq[cmp --silent $mlims $mlims.part && rm $mlims.part]) if (-s qq[$mlims.part]);
 }
@@ -242,10 +263,7 @@ sub update_tracking_info
                 $$diff{$bam} = qq[OLD:\t$bam\t$$info{$bam}{info}\nNEW:\t$bam\t$current_info\n];
             }
         }
-        else
-        {
-            $$new{$bam}{info} = $current_info unless (exists $$imported{$bam});
-        }
+        $$new{$bam}{info} = $current_info unless (exists $$imported{$bam} || $F[-1] eq "0");
         $$info{$bam}{info} = $current_info;
         if (exists $$wh2{$bam})
         {
