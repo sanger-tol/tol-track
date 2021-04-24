@@ -245,7 +245,7 @@ sub update_tracking_info
         else
         {
             my $movie = pbbam2movie($opts, $bam);
-            unless ($bam =~ m/subreads/ || exists $$imported{$movie})
+            unless ($bam =~ m/reads\.bam$/ || exists $$imported{$movie})
             {
                 $$new{$bam}{info} = $current_info;
                 $$new{$bam}{movie} = $movie;
