@@ -73,16 +73,16 @@ my $xmlhash;
 # Make test submission
 if ($skip_test)
 {
-    print "Skipping test submission.\n";
+    print "Skipping test submission.\n" if $verbose;
 }
 else
 {
-    print "Making test submission...\n";
+    print "Making test submission...\n" if $verbose;
     $xmlhash = make_submission($subfile, $prjfile, $test_url, "$file_prefix.receipt.xml.test");
 
     if (submission_was_successful($xmlhash))
     {
-        print "ENA test submission of study successful.\n";
+        print "ENA test submission of study successful.\n" if $verbose;
     }
     else
     {
@@ -95,12 +95,12 @@ else
 # Make live submission
 if ($skip_live)
 {
-    print "Skipping real submission.\n";
+    print "Skipping real submission.\n" if $verbose;
     exit;
 }
 else
 {
-    print "Making real submission...\n";
+    print "Making real submission...\n" if $verbose;
     $xmlhash = make_submission($subfile, $prjfile, $live_url, "$file_prefix.receipt.xml");
 
     unless (submission_was_successful($xmlhash))
@@ -111,9 +111,9 @@ else
     }
 }
 
-my($submission_alias, $submission_acc, $project_acc) = get_submission_alias_acc_from_xml($xmlhash);
+my($submission_alias, $project_acc) = get_submission_alias_acc_from_xml($xmlhash);
 
-print "ENA submission was successful:\t$submission_alias\t$submission_acc\t$project_acc\n";
+print "ENA submission was successful:\t$submission_alias\t$project_acc\n";
 
 ###############################################################################
 
@@ -159,8 +159,7 @@ sub get_submission_alias_acc_from_xml
 {
     my $xml = shift;
     my $submission_alias = $xml->{SUBMISSION}->[0]->{'alias'};
-    my $submission_acc = $xml->{SUBMISSION}->[0]->{'accession'};
     my $project_acc = $xml->{PROJECT}->[0]->{'accession'};
-    die("Can't retrieve submission info\n") unless ($submission_alias && $submission_acc && $project_acc);
-    return ($submission_alias, $submission_acc, $project_acc);
+    die("Can't retrieve submission info\n") unless ($submission_alias && $project_acc);
+    return ($submission_alias, $project_acc);
 }
