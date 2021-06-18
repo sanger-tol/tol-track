@@ -154,9 +154,13 @@ WHERE study.id_study_lims in ( "$studies" ) AND run_status.iscurrent = 1;'];
         # awk -F"\t" 'BEGIN{OFS="\t"}$10~/HiSeq/{print "/seq/"$11"/"$11"_"$12"#"$13".cram\t"$0} $10~/NovaSeq/{col=substr($11,0,2); print "/seq/illumina/runs/"col"/"$11"/lane"$12"/plex"$13"/"$11"_"$12"#"$13".cram\t"$0
         my @F = split /\t/;
         my $label = "$F[3].$F[9].$F[10].$F[12]";
-        if ($F[9] =~ /NovaSeq/ && exists $runs{"$label"})
+        if ($F[9] =~ /NovaSeq/)
         {
-            $F[11] = 'NULL';
+            $F[11] = 'NULL' if exists $runs{"$label"};
+        }
+        else
+        {
+            $label .= "$F[11]";
         }
         $runs{"$label"} = \@F;
     }
@@ -218,6 +222,7 @@ sub load_already_imported
     my ($opts) = @_;
     system(qq[cat $$opts{root}/data/*/*/*/genomic_data/*/*/IRODS*.fofn | grep -v pacbio | grep -v lustre > $$opts{base}.imported]);
     system(qq[cat $$opts{root}/data/*/*/*/transcriptomic_data/*/*/IRODS*.fofn | grep -v pacbio | grep -v lustre >> $$opts{base}.imported]);
+    system(qq[cat $$opts{root}/data/*/*/*/resequencing_data/*/*/IRODS*.fofn | grep -v pacbio | grep -v lustre >> $$opts{base}.imported]);
     my $imported = read_list(qq[$$opts{base}.imported]);
     return $imported;
 }
@@ -258,12 +263,12 @@ sub update_tracking_info
         my $current_info = join("\t", @F);
         if (exists $$info{$bam})
         {
-            unless ($current_info eq $$info{$bam}{info})
+            if ($current_info =~ /qc complete/ && $F[-1] eq "1" && $current_info ne $$info{$bam}{info})
             {
                 $$diff{$bam} = qq[OLD:\t$bam\t$$info{$bam}{info}\nNEW:\t$bam\t$current_info\n];
             }
         }
-        $$new{$bam}{info} = $current_info unless (exists $$imported{$bam} || $F[-1] eq "0");
+        $$new{$bam}{info} = $current_info unless (exists $$imported{$bam} || $current_info !~ /qc complete/ || $F[-1] eq '0'); # ignore already imported files and those not yet QC'd
         $$info{$bam}{info} = $current_info;
         if (exists $$wh2{$bam})
         {
@@ -292,16 +297,24 @@ sub update_tracking_info
     }
     if ($new)
     {
-        write_info_to_file($new,"$$opts{base}.fofn.new");
-        my $new_txt = '';
-        foreach my $id (keys %{$$opts{conf}})
+        foreach my $bam (keys %$new)
         {
-            next unless (`awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new`);
-            $new_txt .= qq[new Illumina data for '$$opts{conf}{$id}{study} ($id)'. Import with:\n\n`awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new | wr-import-hic -r \$TOLQCROOT/data -g '$$opts{conf}{$id}{subdir}' | wr add`\n\n];
-            $new_txt .= `awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new | cut -f2-5,20 | sort | uniq`;
-            $new_txt .= qq[\n];
+            my $check = `ils $bam 2>&1`;
+            delete $$new{$bam} if ($check =~ /ERROR/);
         }
-        send_email($$opts{email}, "new $$opts{label} Illumina data in iRODS", $new_txt) if ($new_txt && $$opts{email});
+        if (keys %$new)
+        {
+            write_info_to_file($new,"$$opts{base}.fofn.new");
+            my $new_txt = '';
+            foreach my $id (keys %{$$opts{conf}})
+            {
+                next unless (`awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new`);
+                $new_txt .= qq[new Illumina data for '$$opts{conf}{$id}{study} ($id)'. Import with:\n\n`awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new | wr-import-hic -r \$TOLQCROOT/data -g '$$opts{conf}{$id}{subdir}' | wr add`\n\n];
+                $new_txt .= `awk -F"\\t" '\$19==$id' $$opts{base}.fofn.new | cut -f2-5,20 | sort | uniq`;
+                $new_txt .= qq[\n];
+            }
+            send_email($$opts{email}, "new $$opts{label} Illumina data in iRODS", $new_txt) if ($new_txt && $$opts{email});
+        }
     }
     else
     {
