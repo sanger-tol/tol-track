@@ -55,7 +55,7 @@ sub parse_params
         baton => 1,
         baton_metaquery => '/software/npg/current/bin/baton-metaquery',
         baton2tsv => '/nfs/users/nfs_s/sm15/scripts/baton2tsv',
-        samtools => '/software/singularity-v3.6.4/bin/singularity exec -B /lustre:/lustre /software/tola/images/htstools-1.10.2.sif samtools'
+        samtools => '/software/singularity-v3.6.4/bin/singularity exec -B /lustre:/lustre /software/tola/images/htstools-1.12.sif samtools'
     };
     while (defined(my $arg=shift(@ARGV)))
     {
@@ -164,7 +164,7 @@ sub update_baton
     my ($opts) = @_;
     my $studies = $$opts{studies};
     my $jq = qq[jq -n '{"collection":"/seq", "avus": [{"attribute": "study_id", "value": [ "$studies" ], "operator": "in"},{"attribute": "cell_index", "value": "\%", "operator": "like"},{"attribute": "type", "value": "bam"}]}'];
-    system(qq[$jq | $$opts{baton_metaquery} --avu > $$opts{base}.json.part]);
+    system(qq[$jq | $$opts{baton_metaquery} --avu | perl -pe 's/[[:^ascii:]]/ /g' > $$opts{base}.json.part]);
 }
 
 sub load_tracking_info
@@ -208,7 +208,7 @@ sub update_tracking_info
     my $new;
     my $diff;
     my $wh2;
-    my $fields = q[sample_public_name,sample_common_name,sample_supplier_name,sample,run,well,sample_accession_number,study_id,study,md5];
+    my $fields = q[sample_public_name,sample_common_name,sample_supplier_name,sample,run,well,sample_accession_number,sample_donor_id,study_id,study,md5];
     my $json = -s qq[$$opts{base}.json.part] ? qq[$$opts{base}.json.part] : qq[$$opts{base}.json];
     open(my $fh, "$$opts{baton2tsv} -c $fields $json |") || die("Could not open file for reading [$json]");
     while(<$fh>)
@@ -285,9 +285,9 @@ sub update_tracking_info
         my $new_txt = '';
         foreach my $id (keys %{$$opts{conf}})
         {
-            next unless (`awk -F"\\t" '\$9==$id' $$opts{base}.fofn.new | grep demul`);
-            $new_txt .= qq[new PacBio data for '$$opts{conf}{$id}{study} ($id)'. Import with:\n\n`awk -F"\\t" '\$9==$id' $$opts{base}.fofn.new | wr-import-pacbio-ccs -r \$TOLQCROOT/data -g '$$opts{conf}{$id}{subdir}' | wr add`\n\n];
-            $new_txt .= `awk -F"\\t" '\$9==$id' $$opts{base}.fofn.new | cut -f2-5,10 | sort`;
+            next unless (`awk -F"\\t" '\$10==$id' $$opts{base}.fofn.new | grep demul`);
+            $new_txt .= qq[new PacBio data for '$$opts{conf}{$id}{study} ($id)'. Import with:\n\n`awk -F"\\t" '\$10==$id' $$opts{base}.fofn.new | wr-import-pacbio-ccs -r \$TOLQCROOT/data -g '$$opts{conf}{$id}{subdir}' | wr add`\n\n];
+            $new_txt .= `awk -F"\\t" '\$10==$id' $$opts{base}.fofn.new | cut -f2-5,11 | sort`;
             $new_txt .= qq[\n];
         }
         send_email($$opts{email}, "new $$opts{label} PacBio data in iRODS", $new_txt) if ($new_txt && $$opts{email});
