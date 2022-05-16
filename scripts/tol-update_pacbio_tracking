@@ -55,7 +55,7 @@ sub parse_params
         baton => 1,
         baton_metaquery => '/software/npg/current/bin/baton-metaquery',
         baton2tsv => '/nfs/users/nfs_s/sm15/scripts/baton2tsv',
-        samtools => '/software/singularity-v3.6.4/bin/singularity exec -B /lustre:/lustre /software/tola/images/htstools-1.12.sif samtools'
+        samtools => '/software/singularity-v3.6.4/bin/singularity exec -B /lustre:/lustre /software/tola/images/htstools-1.15.1.sif samtools'
     };
     while (defined(my $arg=shift(@ARGV)))
     {
@@ -127,7 +127,8 @@ SELECT DISTINCT
     smrtcell.pac_bio_run_name,
     smrtcell.well_label,
     study.id_study_lims as study_id,
-    study.name as study_name
+    study.name as study_name,
+    smrtcell.pipeline_id_lims
 
 FROM mlwarehouse.sample
 
@@ -150,6 +151,12 @@ WHERE study.id_study_lims in ( "$studies" );'];
         s/RUN(\d)/RUN-$1/;
         my @F = split /\t/;
         $F[11]="TRACTION-RUN-$F[11]" if ($F[11]=~/^(\d+)$/ && $F[11]<1000);
+        if ($F[2] eq 'NULL')
+        {
+            my @wh_info = get_wh_sample_info($F[0]);
+            if ($wh_info[3]) { $F[2] = $wh_info[3] if ($F[2] eq 'NULL'); }
+            if ($wh_info[4]) { $F[4] = $wh_info[4] if ($F[4] eq 'NULL'); }
+        }
         print $fh join("\t", @F);
     }
     close($sqh);
@@ -208,7 +215,7 @@ sub update_tracking_info
     my $new;
     my $diff;
     my $wh2;
-    my $fields = q[sample_public_name,sample_common_name,sample_supplier_name,sample,run,well,sample_accession_number,sample_donor_id,study_id,study,md5];
+    my $fields = q[sample_public_name,sample_common_name,sample_supplier_name,sample,run,well,sample_accession_number,sample_donor_id,study_id,study,md5,tag_index];
     my $json = -s qq[$$opts{base}.json.part] ? qq[$$opts{base}.json.part] : qq[$$opts{base}.json];
     open(my $fh, "$$opts{baton2tsv} -c $fields $json |") || die("Could not open file for reading [$json]");
     while(<$fh>)
@@ -216,6 +223,7 @@ sub update_tracking_info
         chomp;
         next if (/scraps/ || /removed/ || /^Binary/);
         my ($bam, @F) = split /\t/;
+        push(@F,'') unless (scalar @F == 12);
         next if (exists $$opts{ignore}{$bam});
         unless ($F[0])
         {
@@ -296,10 +304,10 @@ sub update_tracking_info
     {
         system(qq[rm -f $$opts{base}.fofn.new]) if (-e "$$opts{base}.fofn.new");
     }
-    if ($new || $diff)
-    {
+    # if ($new || $diff)
+    # {
         write_info_to_file($info,"$$opts{base}.fofn.part");
-    }
+    # }
     system(qq[cmp --silent $$opts{base}.fofn $$opts{base}.fofn.part && rm $$opts{base}.fofn.part]) if (-s qq[$$opts{base}.fofn.part]);
     system(qq[cmp --silent $$opts{base}.json $$opts{base}.json.part && rm $$opts{base}.json.part]) if (-s qq[$$opts{base}.json.part]);
     # if (-s qq[$$opts{base}.fofn.part])
@@ -365,7 +373,8 @@ sub read_list
     while(<$fh>)
     {
         chomp;
-        $$list{$_} = 1;
+        my @line = split "\t";
+        $$list{$line[0]} = 1;
     }
     close($fh);
     return $list;

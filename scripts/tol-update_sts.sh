@@ -27,7 +27,7 @@
 # Remove trailing whitespace in columns
 /usr/bin/psql ${STSDB} -A -F $'\t' \
 -f ${TOLQCROOT}/track/tol_sts.sql | \
-awk 'NF>2' | sed -r 's/ +\t/\t/g' > ${TOLQCROOT}/track/tol_sts.tsv.part
+awk 'NF>2' | sed -r "s/ +\t/\t/g; s/‘/'/g; s/’/'/g" > ${TOLQCROOT}/track/tol_sts.tsv.part
 
 if [[ -s ${TOLQCROOT}/track/tol_sts.tsv.part ]];
 then

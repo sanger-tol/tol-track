@@ -126,6 +126,7 @@ SELECT DISTINCT
     run_status.date,
     study.id_study_lims as study_id,
     study.name as study_name,
+    study.reference_genome,
     flowcell.manual_qc
 
 FROM mlwarehouse.sample
@@ -143,55 +144,90 @@ ON (flowcell.id_sample_tmp = sample.id_sample_tmp
     AND run_status.id_run = run_lane_metrics.id_run
     AND run_status.id_run_status_dict = run_status_dict.id_run_status_dict
     AND flowcell.id_study_tmp = study.id_study_tmp)
-
 WHERE study.id_study_lims in ( "$studies" ) AND run_status.iscurrent = 1;'];
+# WHERE study.id_study_lims = 6101 AND sample.name = "DTOL_RD8092206" and run_status.iscurrent = 1;'];
 
+
+    my %labels;
     my %runs;
+    my %run_lane;
+    my %run_merge;
     open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
     while(<$sqh>)
     {
         next if /public_name/;
         # awk -F"\t" 'BEGIN{OFS="\t"}$10~/HiSeq/{print "/seq/"$11"/"$11"_"$12"#"$13".cram\t"$0} $10~/NovaSeq/{col=substr($11,0,2); print "/seq/illumina/runs/"col"/"$11"/lane"$12"/plex"$13"/"$11"_"$12"#"$13".cram\t"$0
         my @F = split /\t/;
-        my $label = "$F[3].$F[9].$F[10].$F[12]";
+        my $ref = $F[19];
+        @F = (@F[0..18],$F[20]);
+        my $label = "$F[3].$F[9].$F[10].$F[12]"; # name.instument_model.id_run.tag_index[.position]
         if ($F[9] =~ /NovaSeq/)
         {
-            $F[11] = 'NULL' if exists $runs{"$label"};
+            if (exists $run_lane{$F[10]}{$F[12]})
+            {
+                if ($run_lane{$F[10]}{$F[12]} eq $label)
+                {
+                    $run_merge{$F[10]}{$F[12]} = 1;
+                }
+            }
+            else
+            {
+                $run_lane{$F[10]}{$F[12]} = $label;
+                $run_merge{$F[10]}{$F[12]} = 0;
+            }
+            if ($ref =~ /\S+/ && $ref ne 'NULL')
+            {
+                $run_merge{$F[10]}{$F[12]} = 0;
+            }
         }
-        else
-        {
-            $label .= "$F[11]";
-        }
-        $runs{"$label"} = \@F;
+        $labels{"$label.$F[11]"} = \@F;
     }
     close($sqh);
-
-    my $mlims = qq[$$opts{base}.lims.tsv];
-    open(my $fh, ">$mlims.part") || die("Could not open file for writing [$mlims.part]");
-    foreach my $val (values %runs)
+    foreach my $run (sort keys %run_merge)
     {
+        foreach my $lane (sort keys %{$run_merge{$run}})
+        {
+            if ($run_merge{$run}{$lane} == 0)
+            {
+                foreach my $lane (sort keys %{$run_merge{$run}})
+                {
+                    $run_merge{$run}{$lane} = 0;
+                }
+                last;
+            }
+        }
+    }
+
+    my $files;
+    my $mlims = qq[$$opts{base}.lims.tsv];
+    open(my $fh, "| sort -k1,1V  >$mlims.part") || die("Could not open file for writing [$mlims.part]");
+    foreach my $val (sort values %labels)
+    {
+        my $file;
         my @F = @$val;
         if ($F[9] =~ /[HM]iSeq/)
         {
-            unshift @F, qq[/seq/$F[10]/$F[10]_$F[11]#$F[12].cram];
+            $file = qq[/seq/$F[10]/$F[10]_$F[11]#$F[12].cram];
         }
         elsif ($F[9] =~ /NovaSeq/)
         {
             my $col = substr($F[10], 0, 2);
-            if ($F[11] eq 'NULL')
+            if ($F[11] eq 'NULL' || $run_merge{$F[10]}{$F[12]} == 1)
             {
-                unshift @F, qq[/seq/illumina/runs/$col/$F[10]/plex$F[12]/$F[10]#$F[12].cram];
+                $file = qq[/seq/illumina/runs/$col/$F[10]/plex$F[12]/$F[10]#$F[12].cram];
             }
             else
             {
-                unshift @F, qq[/seq/illumina/runs/$col/$F[10]/lane$F[11]/plex$F[12]/$F[10]_$F[11]#$F[12].cram];
+                $file = qq[/seq/illumina/runs/$col/$F[10]/lane$F[11]/plex$F[12]/$F[10]_$F[11]#$F[12].cram];
             }
         }
         else
         {
             die("Unknown Illumina platform [$F[9]]");
         }
-        print $fh join("\t", @F);
+        next if (exists $$files{$file});
+        $$files{$file} = 1;
+        print $fh join("\t", $file, @F);
     }
     close($sqh);
     close($fh);
@@ -289,7 +325,7 @@ sub update_tracking_info
         }
         close($fh);
         my $diff_txt = `cut -f1,3- $$opts{base}.fofn.diff`;
-        send_email($$opts{email},"modified metadata for $$opts{label} Illumina data in iRODS", $diff_txt) if ($$opts{email});
+        # send_email($$opts{email},"modified metadata for $$opts{label} Illumina data in iRODS", $diff_txt) if ($$opts{email});
     }
     else
     {
