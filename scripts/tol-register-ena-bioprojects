@@ -73,21 +73,21 @@ my $xmlhash;
 # Make test submission
 if ($skip_test)
 {
-    print "Skipping test submission.\n" if $verbose;
+    print STDERR "Skipping test submission.\n" if $verbose;
 }
 else
 {
-    print "Making test submission...\n" if $verbose;
+    print STDERR "Making test submission...\n" if $verbose;
     $xmlhash = make_submission($subfile, $prjfile, $test_url, "$file_prefix.receipt.xml.test");
 
     if (submission_was_successful($xmlhash))
     {
-        print "ENA test submission of study successful.\n" if $verbose;
+        print STDERR "ENA test submission of study successful.\n" if $verbose;
     }
     else
     {
-        print "ENA test submission of study failed.\n";
-        print join "\n", @{$xmlhash->{MESSAGES}->[0]->{ERROR}},"\n";
+        print STDERR "ENA test submission of study failed.\n";
+        print STDERR join "\n", @{$xmlhash->{MESSAGES}->[0]->{ERROR}},"\n";
         exit 1;
     }
 }
@@ -95,25 +95,32 @@ else
 # Make live submission
 if ($skip_live)
 {
-    print "Skipping real submission.\n" if $verbose;
+    print STDERR "Skipping real submission.\n" if $verbose;
     exit;
 }
 else
 {
-    print "Making real submission...\n" if $verbose;
+    print STDERR "Making real submission...\n" if $verbose;
     $xmlhash = make_submission($subfile, $prjfile, $live_url, "$file_prefix.receipt.xml");
 
     unless (submission_was_successful($xmlhash))
     {
-        print "ENA submission failed\n";
-        print join "\n", @{$xmlhash->{MESSAGES}->[0]->{ERROR}},"\n";
+        print STDERR "ENA submission failed\n";
+        print STDERR join "\n", @{$xmlhash->{MESSAGES}->[0]->{ERROR}},"\n";
         exit 1;
     }
 }
 
 my($submission_alias, $project_acc) = get_submission_alias_acc_from_xml($xmlhash);
 
-print "ENA submission was successful:\t$submission_alias\t$project_acc\n";
+if ($verbose)
+{
+    print STDERR "ENA submission was successful:\t$submission_alias\t$project_acc\n";
+}
+else
+{
+    print STDOUT "$project_acc\n";
+}
 
 ###############################################################################
 
