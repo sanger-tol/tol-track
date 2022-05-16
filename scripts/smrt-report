@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-#    Copyright (C) 2020 Genome Research Ltd.
+#    Copyright (C) 2020-2021 Genome Research Ltd.
 #
 #    Author: Shane McCarthy <sm15@sanger.ac.uk>
 #            (base on examples from Carol Scott)
@@ -78,3 +78,9 @@ python3 -m pbreports.report.control  --log-level INFO  --optional input/$movie.s
 # cleanup
 rm -r input
 rm -f $movie.adapters.fasta $movie.subreads.bam $movie.subreads.bam.pbi $movie.scraps.bam $movie.scraps.bam.pbi
+
+# upload
+for file in `ls reports/*.png | grep -v thumb`;
+do
+    s3cmd put --acl-public --quiet $file s3://tolqc$smrtdir/$file;
+done
