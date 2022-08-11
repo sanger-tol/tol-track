@@ -221,7 +221,7 @@ sub update_tracking_info
     while(<$fh>)
     {
         chomp;
-        next if (/scraps/ || /removed/ || /^Binary/);
+        next if (/scraps/ || /removed/ || /unbarcoded/ || /^Binary/);
         my ($bam, @F) = split /\t/;
         push(@F,'') unless (scalar @F == 12);
         next if (exists $$opts{ignore}{$bam});
@@ -253,7 +253,7 @@ sub update_tracking_info
         else
         {
             my $movie = pbbam2movie($opts, $bam);
-            unless ($bam =~ m/reads\.bam$/ || exists $$imported{$movie})
+            unless (($bam =~ m/reads\.bam$/ && $F[11]) || exists $$imported{$movie})
             {
                 $$new{$bam}{info} = $current_info;
                 $$new{$bam}{movie} = $movie;
@@ -293,7 +293,7 @@ sub update_tracking_info
         my $new_txt = '';
         foreach my $id (keys %{$$opts{conf}})
         {
-            next unless (`awk -F"\\t" '\$10==$id' $$opts{base}.fofn.new | grep demul`);
+            next unless (`awk -F"\\t" '\$10==$id' $$opts{base}.fofn.new`);
             $new_txt .= qq[new PacBio data for '$$opts{conf}{$id}{study} ($id)'. Import with:\n\n`awk -F"\\t" '\$10==$id' $$opts{base}.fofn.new | wr-import-pacbio-ccs -r \$TOLQCROOT/data -g '$$opts{conf}{$id}{subdir}' | wr add`\n\n];
             $new_txt .= `awk -F"\\t" '\$10==$id' $$opts{base}.fofn.new | cut -f2-5,11 | sort`;
             $new_txt .= qq[\n];
