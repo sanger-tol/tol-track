@@ -52,6 +52,7 @@ sub parse_params
         label => '',
         email => '',
         mlims => 1,
+        mlimsonly => 0,
     };
     while (defined(my $arg=shift(@ARGV)))
     {
@@ -59,6 +60,7 @@ sub parse_params
         elsif ( $arg eq '-l' || $arg eq '--label' ) { $$opts{label} = shift(@ARGV); next; }
         elsif ( $arg eq '-e' || $arg eq '--email' ) { $$opts{email} = shift(@ARGV); next; }
         elsif (                 $arg eq '--no-mlims' ) { $$opts{mlims} = 0; next; }
+        elsif (                 $arg eq '--mlims-only' ) { $$opts{mlimsonly} = 1; next; }
         elsif ( $arg eq '-?' || $arg eq '-h' || $arg eq '--help' ) { error(); }
         else { error("Unknown option $arg"); }
     }
@@ -75,7 +77,7 @@ sub update_illumina_tracking
 {
     my ($opts) = @_;
     update_mlims($opts) if ($$opts{mlims});
-    update_tracking_info($opts);
+    update_tracking_info($opts) unless ($$opts{mlimsonly});
 }
 
 sub load_config
@@ -91,6 +93,7 @@ sub load_config
     while(<$fh>)
     {
         chomp;
+        next if /^#/;
         my ($id,$subdir,$study) = split /\t/;
         $$res{$id} = { subdir => "$subdir", study => "$study" };
     }
@@ -358,7 +361,8 @@ sub update_tracking_info
     }
     if ($new || $diff)
     {
-        write_info_to_file($info,"$$opts{base}.fofn.part");
+        my $head = join "\t", qw(file tolid common_name pipeline sample supplier_name biosample biospecimen taxon_id description instrument run_id lane tag tag_seq1 tag_seq2 run_status run_date study_id study manual_qc);
+        write_info_to_file($info,"$$opts{base}.fofn.part", $head);
     }
     system(qq[cmp --silent $$opts{base}.fofn $$opts{base}.fofn.part && rm $$opts{base}.fofn.part]) if (-s qq[$$opts{base}.fofn.part]);
     system(qq[cmp --silent $$opts{base}.json $$opts{base}.json.part && rm $$opts{base}.json.part]) if (-s qq[$$opts{base}.json.part]);
@@ -366,8 +370,9 @@ sub update_tracking_info
 
 sub write_info_to_file
 {
-    my ($info,$file) = @_;
+    my ($info,$file, $head) = @_;
     open(my $fh, ">$file") || die("Could not write to file [$file]");
+    print $fh "$head\n" if ($head);
     foreach my $bam (sort keys %$info)
     {
         print $fh qq[$bam\t$$info{$bam}{info}];

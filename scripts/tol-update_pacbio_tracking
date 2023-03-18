@@ -97,6 +97,7 @@ sub load_config
     while(<$fh>)
     {
         chomp;
+        next if /^#/;
         my ($id,$subdir,$study) = split /\t/;
         $$res{$id} = { subdir => "$subdir", study => "$study" };
     }
@@ -170,7 +171,7 @@ sub update_baton
 {
     my ($opts) = @_;
     my $studies = $$opts{studies};
-    my $jq = qq[jq -n '{"collection":"/seq", "avus": [{"attribute": "study_id", "value": [ "$studies" ], "operator": "in"},{"attribute": "cell_index", "value": "\%", "operator": "like"},{"attribute": "type", "value": "bam"}]}'];
+    my $jq = qq[jq -n '{"collection":"/seq", "avus": [{"attribute": "study_id", "value": [ "$studies" ], "operator": "in"},{"attribute": "cell_index", "value": "\%", "operator": "like"}]}'];
     system(qq[$jq | $$opts{baton_metaquery} --avu | perl -pe 's/[[:^ascii:]]/ /g' > $$opts{base}.json.part]);
 }
 
@@ -223,6 +224,7 @@ sub update_tracking_info
         chomp;
         next if (/scraps/ || /removed/ || /unbarcoded/ || /^Binary/);
         my ($bam, @F) = split /\t/;
+        next unless ($bam =~ /bam$/);
         push(@F,'') unless (scalar @F == 12);
         next if (exists $$opts{ignore}{$bam});
         unless ($F[0])
@@ -306,7 +308,8 @@ sub update_tracking_info
     }
     # if ($new || $diff)
     # {
-        write_info_to_file($info,"$$opts{base}.fofn.part");
+        my $head = join "\t", qw(file tolid common_name supplier_name sample run well biosample biospecimen study_id study md5 tag_index movie);
+        write_info_to_file($info,"$$opts{base}.fofn.part", $head);
     # }
     system(qq[cmp --silent $$opts{base}.fofn $$opts{base}.fofn.part && rm $$opts{base}.fofn.part]) if (-s qq[$$opts{base}.fofn.part]);
     system(qq[cmp --silent $$opts{base}.json $$opts{base}.json.part && rm $$opts{base}.json.part]) if (-s qq[$$opts{base}.json.part]);
@@ -318,8 +321,9 @@ sub update_tracking_info
 
 sub write_info_to_file
 {
-    my ($info,$file) = @_;
+    my ($info,$file, $head) = @_;
     open(my $fh, ">$file") || die("Could not write to file [$file]");
+    print $fh "$head\n" if ($head);
     foreach my $bam (sort keys %$info)
     {
         print $fh qq[$bam\t$$info{$bam}{info}];
