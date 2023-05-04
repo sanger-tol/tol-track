@@ -222,7 +222,7 @@ sub update_tracking_info
     while(<$fh>)
     {
         chomp;
-        next if (/scraps/ || /removed/ || /unbarcoded/ || /^Binary/);
+        next if (/scraps/ || /removed/ || /unbarcoded/ || /^Binary/ || /unassigned/ || /fail_reads/);
         my ($bam, @F) = split /\t/;
         next unless ($bam =~ /bam$/);
         push(@F,'') unless (scalar @F == 12);
