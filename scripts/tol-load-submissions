@@ -1,0 +1,131 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use DBI;
+
+use strict;
+use warnings;
+use Carp;
+use LWP::UserAgent;
+use Net::SSL;
+use JSON;
+use DateTime;
+
+# TODO:
+# * check taxon id matches species name
+# * allow force in case of mismatches
+# * check biosample, biospecimen, bioproject matches species, taxon id, tolid
+
+
+# my $dbh = DBI->connect(qq[DBI:mysql:$ENV{MLWHDEV_DB};host=$ENV{MLWHDEV_HOST};port=$ENV{MLWHDEV_TOL_PORT}],qq[$ENV{MLWHDEV_TOL_RW_USER}],qq[$ENV{MLWHDEV_TOL_RW_PASSWORD}]) or die $DBI::errstr;
+my $dbh    = DBI->connect(qq[DBI:mysql:$ENV{MLWH_DB};host=$ENV{MLWH_HOST};port=$ENV{MLWH_TOL_PORT}],qq[$ENV{MLWH_TOL_RW_USER}],qq[$ENV{MLWH_TOL_RW_PASSWORD}]) or die $DBI::errstr;
+
+my $query  = $dbh->prepare("SELECT id_sample_tmp,name,public_name,common_name,gender,taxon_id,accession_number,donor_id FROM sample WHERE name = ?");
+
+my $check  = $dbh->prepare("SELECT id_tsb_tmp,id_sample_tmp,file,filename,tolid,library_type,biosample_accession,bioproject_accession FROM tol_sample_bioproject WHERE file = ?");
+
+my $update = $dbh->prepare("UPDATE tol_sample_bioproject SET id_sample_tmp=?,file=?,tolid=?,library_type=?,biosample_accession=?,bioproject_accession=? WHERE id_tsb_tmp = ?");
+my $update_fn = $dbh->prepare("UPDATE tol_sample_bioproject SET id_sample_tmp=?,file=?,filename=?,tolid=?,library_type=?,biosample_accession=?,bioproject_accession=? WHERE id_tsb_tmp = ?");
+
+my $insert = $dbh->prepare("INSERT INTO tol_sample_bioproject (id_tsb_tmp,id_sample_tmp,file,tolid,library_type,biosample_accession,bioproject_accession) VALUES (NULL,?,?,?,?,?,?)");
+my $insert_fn = $dbh->prepare("INSERT INTO tol_sample_bioproject (id_tsb_tmp,id_sample_tmp,file,filename,tolid,library_type,biosample_accession,bioproject_accession) VALUES (NULL,?,?,?,?,?,?,?)");
+
+# file    species taxon   library_type    sanger_id   tolid   biosample   biospecimen bioproject  umbrella    tolqc   run experiment
+# /seq/30821/30821_8#9.cram   Aphantopus hyperantus   111886  Chromium genome DTOL8104206 ilAphHype4  SAMEA7523226    SAMEA7523126    PRJEB43027  PRJEB43031  1
+# /seq/30821/30821_8#10.cram  Aphantopus hyperantus   111886  Chromium genome DTOL8104206 ilAphHype4  SAMEA7523226    SAMEA7523126    PRJEB43027  PRJEB43031  1
+
+my @data;
+my @header;
+while (<>)
+{
+    chomp;
+    unless (@header)
+    {
+        @header = split /\t/;
+        next;
+    }
+    next unless /SAM/;
+    my @line = split /\t/;
+    my $record;
+    foreach my $key (@header)
+    {
+        my $value = shift @line;
+        $$record{$key} = $value;
+    }
+    push @data, $record;
+}
+
+foreach my $record (@data)
+{
+    # find the id_sample_tmp corresponding to $$record{sanger_id}
+    my ($sample_id) = run_query($query, $$record{sanger_id});
+
+    # check if we already have a record for the file
+    my @exists = run_query($check,$$record{file});
+    if (@exists)
+    {
+        # skip/update if data is/not the same as existing data
+        if ($exists[1] eq $sample_id &&
+            $exists[3] eq $$record{filename} &&
+            $exists[4] eq $$record{tolid} &&
+            $exists[5] eq $$record{library_type} &&
+            $exists[6] eq $$record{biosample} &&
+            $exists[7] eq $$record{bioproject})
+        {
+            print STDERR "Skipping $$record{file}... no metadata change\n";
+            next;
+        }
+        print STDERR "Updating $$record{file}\n";
+        if ($$record{filename})
+        {
+            run_update($update_fn,$sample_id,$$record{file},$$record{filename},$$record{tolid},$$record{library_type},$$record{biosample},$$record{bioproject},$exists[0]);
+        }
+        else
+        {
+            run_update($update,$sample_id,$$record{file},$$record{tolid},$$record{library_type},$$record{biosample},$$record{bioproject},$exists[0]);
+        }
+    }
+    else
+    {
+        print STDERR "Inserting $$record{file}\n";
+        if ($$record{filename})
+        {
+            run_insert($insert_fn,$sample_id,$$record{file},$$record{filename},$$record{tolid},$$record{library_type},$$record{biosample},$$record{bioproject});
+        }
+        else
+        {
+            run_insert($insert,$sample_id,$$record{file},$$record{tolid},$$record{library_type},$$record{biosample},$$record{bioproject});
+        }
+    }
+}
+
+sub run_query
+{
+    my ($query,$arg) = @_;
+    $query->execute($arg) or die $DBI::errstr;
+    my @row = $query->fetchrow_array();
+    if (@row)
+    {
+        @row = map { defined $_ ? $_ : '' } @row;
+    }
+    return @row;
+}
+
+sub run_insert
+{
+    my ($action,@values) = @_;
+    unless ($action->execute(@values))
+    {
+        confess 'DB load insert failed: '.$DBI::errstr;
+    }
+}
+
+sub run_update
+{
+    my ($action,@values) = @_;
+    unless ($action->execute(@values))
+    {
+        confess 'DB load update failed: '.$DBI::errstr;
+    }
+}

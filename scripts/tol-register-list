@@ -1,0 +1,183 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2021 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use DateTime;
+use Cwd;
+use File::Basename;
+
+my $dt = DateTime->now;
+my $date = $dt->ymd('');
+
+my $script_dir = dirname Cwd::abs_path(__FILE__);
+my $template_dir = qq[$script_dir/../templates];
+
+chdir(qq[$ENV{TOLQCROOT}/sub/bioprojects]);
+
+if (-t STDIN)
+{
+    print qq[\n];
+    print qq[Usage: tol-register-bioprojects-from-list <tsv>\n];
+    print qq[\n];
+    print qq[Description: Script will register or update ToL BioProjects with the ENA\n];
+    print qq[Input is expected to be a TSV read from a file or STDIN with the folling columns:\n];
+    print qq[\n];
+    print qq[  1.  TOLID: The ToLID prefix, e.g. ilAmpTrag (required)\n];
+    print qq[  2.  ASM_ACC: \n];
+    print qq[  3.  SPECIES: The species scientific name (required)\n];
+    print qq[  4.  COMMONNAME: common name for the species (optional)\n];
+    print qq[  5.  COLLABORATOR: \n];
+    print qq[  6.  TAXID: The species NCBI taxon ID (required)\n];
+    print qq[  7.  PARENT_ACC: comma separated list of parent BioProject accessions to link the spcies umbrella up to. Will be used to assin default text to the project descriptions\n];
+    print qq[  8.  DATA_ACC: BioProject accession of the data - will be created if not supplied\n];
+    print qq[  9.  UMBRELLA_ACC: BioProject accession of the species umbrella - will be created if not supplied\n];
+    print qq[  10. COBIONT_ACC: BioProject accessions of any cobiont assemblies (optional)\n];
+    print qq[\n];
+    exit;
+}
+
+# For ASG, we use the prefix of the hub that supplied the sample to add the collaborator text and link to the ASG website describing the hub
+my %collab_map = (
+    'GHC' => 'ASG Sponges-as-Symbiont Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/the-genomic-basis-of-sponge-microbe-symbioses/)',
+    'NSU' => 'ASG Photosymbiosis Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/photosymbiosis-across-the-eukaryotic-tree-of-life/)',
+    'UDUK' => 'ASG Coral-Symbiosis Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/coral-symbiosis-genome-project/)',
+    'DU' => 'ASG Evolution-of-New-Symbioses Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/evolution-of-new-symbioses-in-single-celled-eukaryotes/)',
+    'UOBC' => 'ASG Ciliate-Symbiosis Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/ciliates-as-models-for-symbiosis/)',
+    'VIEC' => 'ASG Genomic-Signatures Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/genomic-signatures-behind-the-origin-of-multiple-cephalopod-symbiotic-organs/)',
+    'QMOUL' => 'ASG Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/bacterial-symbiosis-as-an-adaptation-to-extreme-environments-in-annelid-worms/)',
+    'SL' => 'ASG What-Makes-a-Lichen Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/what-makes-a-lichen/)',
+    'VIEM' => 'ASG Symbiosis-as-a-Driver-for-Molluscan-Diversity Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/symbiosis-as-a-driver-for-molluscan-diversity/)',
+    'URI' => 'ASG Symbiosis-as-a-Driver-for-Molluscan-Diversity Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/symbiosis-as-a-driver-for-molluscan-diversity/)',
+    'SENCK' => 'ASG Symbiosis-as-a-Driver-for-Molluscan-Diversity Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/symbiosis-as-a-driver-for-molluscan-diversity/)',
+    'PORT' => 'ASG Symbioses-in-3D Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/symbioses-in-3d/)',
+    'UOREG' => 'ASG Symbioses-in-3D Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/symbioses-in-3d/)',
+    'UCALI' => 'ASG Symbioses-in-3D Hub (https://www.aquaticsymbiosisgenomics.org/collaborators/symbioses-in-3d/)',
+);
+
+# default discription text
+my %descriptions = (
+    # EBP
+    'PRJNA533106' => '',
+    # DToL
+    'PRJEB40665' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, to facilitate genome assembly and annotation as part of the Darwin Tree of Life Project (https://www.darwintreeoflife.org/). The data under this project are made available subject to the Darwin Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/).',
+    # VGP
+    'PRJNA489243' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME. The assembly is provided by the Wellcome Sanger Institute Tree of Life Programme (https://www.sanger.ac.uk/programme/tree-of-life/) in collaboration with COLLABORATOR. The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/).',
+    # DToL/VGP
+    'PRJEB40665,PRJNA489243' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, to facilitate genome assembly and annotation as part of the Darwin Tree of Life Project (https://www.darwintreeoflife.org/). The data under this project are made available subject to the Darwin Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/).',
+    # ASG
+    'PRJEB43743' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, to facilitate genome assembly and annotation as part of the Aquatic Symbiosis Genomics (ASG) Project (https://www.aquaticsymbiosisgenomics.org/) from samples supplied by the COLLABORATOR. The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/).',
+    # ToL
+    'PRJEB43745' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME. The assembly is provided by the Wellcome Sanger Institute Tree of Life Programme (https://www.sanger.ac.uk/programme/tree-of-life/) in collaboration with COLLABORATOR. The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/).',
+    # 25G
+    'PRJEB33226' => '',
+    # BAdASS
+    'PRJEB51690' => 'This project collects the genomic and transcriptomic data generated for the mosquito species SPECIES to facilitate genome assembly and annotation as part of the Anopheles Reference Genomes project. These data (including raw data and assemblies) are released for reuse for any purpose upon deposition in ENA, and we encourage reuse. More information on Sanger’s data release policy can be found here https://www.sanger.ac.uk/about/who-we-are/research-policies/open-access-science/.',
+    # ERGA Pilot
+    'PRJEB47820' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, as part of the European Reference Genome Atlas Pilot Project (https://www.erga-biodiversity.eu/pilot-project). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/). The assembly is provided by the Wellcome Sanger Institute Tree of Life Programme (https://www.sanger.ac.uk/programme/tree-of-life/) in collaboration with COLLABORATOR.',
+    # DToL/ERGA Pilot
+    'PRJEB40665,PRJEB47820' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, as part of the European Reference Genome Atlas Pilot Project (https://www.erga-biodiversity.eu/pilot-project) and the Darwin Tree of Life Project (https://www.darwintreeoflife.org/). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/). The assembly is provided by the Wellcome Sanger Institute Tree of Life Programme (https://www.sanger.ac.uk/programme/tree-of-life/) in collaboration with COLLABORATOR.',
+    # DToL/ASG overlap
+    # 'PRJEB40665,PRJEB43743' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, to facilitate genome assembly and annotation as part of both the Darwin Tree of Life Project (https://www.darwintreeoflife.org/) and the Aquatic Symbiosis Genomics (ASG) Project (https://www.aquaticsymbiosisgenomics.org/) in collaboration with the COLLABORATOR. The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/).',
+);
+
+$descriptions{'PRJEB47820,PRJEB43745,PRJNA489243'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB47820,PRJEB43745'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB47820,PRJNA489243'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB40665,PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB40665,PRJEB47820'};
+$descriptions{'PRJEB40665,PRJEB43743'} = $descriptions{'PRJEB40665'};
+
+while (<>)
+{
+    chomp;
+    next if /^#/;
+    my ($tolid,$asms,$sp,$common,$collab,$taxid,$projects,$data,$umbrella) = split /\t/;
+    $data = '' unless ($data);
+    $umbrella = '' unless ($umbrella);
+
+    my $spu =$sp;
+    $spu =~ s/ /_/g;
+
+    unless (exists $descriptions{$projects} && $descriptions{$projects})
+    {
+        print STDERR qq[No description setup for projects [$projects]... skipping\n];
+        next;
+    }
+
+    my $template = qq[$template_dir/template.data.xml];
+    my $txt = `cat $template`;
+    $txt =~ s/PROJECTDESCRIPTION/$descriptions{$projects}/g;
+    if ($data)
+    {
+        $txt =~ s/IDENTIFIER/accession="$data"/;
+    }
+    else
+    {
+        $txt =~ s/IDENTIFIER/alias="ena-tol-$tolid-study-rawdata-$date"/;
+    }
+    $txt =~ s/SPECIES/$sp/g;
+    $txt =~ s/DATE/$date/g;
+    $txt =~ s/TOLID/$tolid/g;
+    if ($common)
+    {
+        $txt =~ s/COMMONNAME/$common/g;
+    }
+    else
+    {
+        $txt =~ s/, common name COMMONNAME,//g;
+        $txt =~ s/, common name COMMONNAME//g;
+        $txt =~ s/ \(COMMONNAME\)//g;
+    }
+    if ($collab)
+    {
+        my $collab_txt = exists $collab_map{$collab} ? $collab_map{$collab} : $collab;
+        $txt =~ s/COLLABORATOR/$collab_txt/g;
+    }
+    else
+    {
+        $txt =~ s/ in collaboration with COLLABORATOR//g;
+    }
+    $txt =~ s/TAXID/$taxid/g;
+
+    system(qq[mkdir -p $spu]);
+    open(my $fh, ">$spu/$spu.data.$date.xml") || die("Could not write to $spu/$spu.data.$date.xml");
+    print $fh $txt;
+    close($fh);
+    if ($data)
+    {
+        system(qq[cp $template_dir/template.submission.modify.xml $spu/$spu.data.$date.submission.xml]);
+    }
+    else
+    {
+        system(qq[cp $template_dir/template.submission.add.xml $spu/$spu.data.$date.submission.xml]);
+    }
+
+    $data = `tol-register-ena-bioprojects --no_test --prefix $spu/$spu.data.$date`;
+    chomp $data;
+
+    $umbrella = `echo "$tolid\\t$asms\\t$sp\\t$common\\t$collab\\t$taxid\\t$projects\\t$data\\t$umbrella" | tol-register-list-umbrella`;
+    chomp $umbrella;
+
+    print qq[$tolid\t$asms\t$sp\t$common\t$collab\t$taxid\t$projects\t$data\t$umbrella\n];
+}

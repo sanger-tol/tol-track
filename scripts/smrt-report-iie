@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+#    Copyright (C) 2021 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+export PATH=${SMRTPATH}:${PATH}
+
+smrtdir=$(dirname $1)
+smrtfile=$(basename $1)
+movie=${smrtfile/.reads.bam/}
+movie=${movie/.hifi_reads*.bam/}
+
+# suffix=""
+# if [ "$#" -eq 2 ]; then
+#     suffix=$2
+# fi
+
+revio=""
+if [ "$#" -eq 2 ]; then
+    revio=".hifi_reads"
+fi
+
+wd=${TOLQCROOT}/$smrtdir
+mkdir -p $wd
+cd $wd
+
+if [[ ! -f $movie.consensusreadset.xml ]]; then
+    iget -Kf $smrtdir/$movie$revio.consensusreadset.xml $movie.consensusreadset.xml
+    chmod a-x $movie.consensusreadset.xml
+fi
+if [[ ! -f $movie.sts.xml ]]; then
+    iget -Kf $smrtdir/$movie.sts.xml
+    chmod a-x $movie.sts.xml
+fi
+if [[ ! -f reports ]]; then
+    iget -Kf $smrtdir/$movie.primary_qc.tar.xz
+    tar -xf $movie.primary_qc.tar.xz
+    mv $movie.primary_qc reports
+    rm $movie.primary_qc.tar.xz
+    chmod a-x reports/*
+fi
+if [[ ! -f $smrtdir/reports/merged_analysis_report.json ]]; then
+    iget -Kf $smrtdir/merged_analysis_report.json reports/merged_analysis_report.json
+    chmod a-x reports/merged_analysis_report.json
+fi
+
+chmod -R a+rX,g-w .
+
+for file in `ls reports/*.png | grep -v thumb`;
+do
+    s3cmd put --acl-public --quiet $file s3://tolqc$smrtdir/$file;
+done

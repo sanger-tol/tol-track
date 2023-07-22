@@ -1,0 +1,151 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2023 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use JSON;
+
+# This is a hacky script to compare the informatics spreadsheet tracking
+# of bioprojects to bioprojects registered by datahose in subtrack
+
+# Use as a way to spot mistakes, but also a way to pick up the datahose
+# created bioprojects in order to link up under appropriate species
+# umbrella bioprojects
+
+
+# bioprojects to ignore
+my %ignore = (
+    'ERP131382' => 1,
+    'ERP132375' => 1,
+    'ERP133077' => 1,
+    'ERP132033' => 1,
+    'ERP131383' => 1,
+    'ERP132042' => 1,
+    'PRJEB41902' => 1,
+    'PRJEB41903' => 1,
+    'PRJEB53175' => 1,
+    'PRJEB43477' => 1,
+    'PRJEB51577' => 1,
+);
+
+# get bioprojects data from the informatics spreadsheet
+system('tolqc-status_report');
+my $bioprojects_json = `s3cmd get --quiet s3://tolqc/project/data.json -`;
+my $bioprojects = decode_json($bioprojects_json);
+
+# get the assembly bioprojects created by datahose
+my $subtrack = load_subtrack();
+
+# compare the bioprojects data in the spreadsheet to subtrack and report any differences
+compare_subtrack($bioprojects, $subtrack);
+
+exit;
+
+sub load_subtrack
+{
+    # get cobiont mapping to host, so we can group under the correct species
+    my $cobionts_json = `s3cmd get --quiet s3://tolqc/cobiont/hash.json -`;
+    my $cobionts = decode_json($cobionts_json);
+
+    my %load;
+    my $cmd = qq[mysql -u$ENV{SUBTRACK_USER} -h $ENV{SUBTRACK_HOST} -P$ENV{SUBTRACK_PORT} $ENV{SUBTRACK_DATABASE} -se '
+select ebi_study_acc,name from assembly_info where analysis_type = "ASSE";'];
+    open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
+    while(<$sqh>)
+    {
+        chomp;
+        next if /^ebi_study/;
+        my ($project,$name) = split /\t/;
+        next if $project eq 'NULL';
+        next if (exists $ignore{$project});
+        my ($tolpre,$type) = $name =~ m/^([[:alpha:]]+)\d+(.*)$/;
+        my ($tolid) = $name =~ /^(\S+)/;
+        $tolid =~ s/\.\d+$//;
+        $type =~ s/\s+$// if ($type);
+        $type =~ s/^[\.\s]+// if ($type);
+        $type =~ s/^[m\.\s]+// if ($type);
+        if (exists $$cobionts{$tolid})
+        {
+            $tolpre = $$cobionts{$tolid}->[0]->{host_tolid};
+            $tolpre =~ s/\d+$//;
+            $load{$tolpre}->{cobiont}->{$project} = 1;
+            next;
+        }
+        next unless ($tolpre);
+        if (!$type || $type =~ /alternate/ || $type =~ /paternal/ || $type =~ /maternal/ || $type =~ /chloroplast/ || $type =~ /mitochondrion/ || $type =~ /^\d+$/)
+        {
+            if ($type =~ /_sp_/)
+            {
+                $load{$tolpre}->{cobiont}->{$project} = 1;
+            }
+            else
+            {
+                $load{$tolpre}->{asm}->{$project} = 1;
+            }
+        }
+        else
+        {
+            $load{$tolpre}->{cobiont}->{$project} = 1;
+        }
+    }
+    close($sqh);
+    my $subtrack = {};
+    while (my ($tolpre, $projects) = each %load)
+    {
+        if (exists $$projects{asm})
+        {
+            $$subtrack{$tolpre}->{ASM_ACC} = join(",", sort keys %{$projects->{asm}});
+        }
+        else
+        {
+            $$subtrack{$tolpre}->{ASM_ACC} = '';
+        }
+        if (exists $$projects{cobiont})
+        {
+            $$subtrack{$tolpre}->{COBIONT_ACC} = join(",", sort keys %{$projects->{cobiont}});
+        }
+        else
+        {
+            $$subtrack{$tolpre}->{COBIONT_ACC} = '';
+        }
+    }
+    return $subtrack;
+}
+
+sub compare_subtrack
+{
+    my ($bioprojects, $subtrack) = @_;
+    foreach my $project (@$bioprojects)
+    {
+        if (exists $$subtrack{$project->{TOLID}})
+        {
+            if ($$subtrack{$project->{TOLID}}->{ASM_ACC} ne $project->{ASM_ACC} || $$subtrack{$project->{TOLID}}->{COBIONT_ACC} ne $project->{COBIONT_ACC})
+            {
+                print join "\t", 'TOLQCINF', $project->{TOLID}, $project->{ASM_ACC}, $project->{COBIONT_ACC}; print "\n";
+                print join "\t", 'SUBTRACK', $project->{TOLID}, $$subtrack{$project->{TOLID}}->{ASM_ACC}, $$subtrack{$project->{TOLID}}->{COBIONT_ACC}; print "\n";
+            }
+        }
+    }
+
+}

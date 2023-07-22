@@ -1,0 +1,69 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2022 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use File::Basename;
+use JSON;
+
+
+my $results;
+open my $fh, "find $ENV{TOLQCROOT}/btk/ -type f -name meta.json | ";
+while(<$fh>)
+{
+    chomp;
+    my $res = read_meta($_);
+    push @$results, $res if ($res);
+}
+close($fh);
+
+dump_btk_datasets($results, qq[$ENV{TOLQCROOT}/track/tol_btk.fofn]);
+
+exit;
+
+sub read_meta
+{
+    my ($file) = @_;
+    my $json_txt = `cat $file`;
+    my $json = decode_json($json_txt);
+    my $dataset = basename(dirname($file));
+    my $alias = '';
+    if (exists $json->{assembly} && exists $json->{assembly}->{alias})
+    {
+        $alias = $json->{assembly}->{alias};
+    }
+    return $alias ? qq[http://grit-btk.tol.sanger.ac.uk/$alias/dataset/$dataset/blob#Filters] : '';
+}
+
+sub dump_btk_datasets
+{
+    my ($datasets,$fofn) = @_;
+    open(my $fh, ">$fofn.part") || die("Could not write to file $fofn.part");
+    foreach my $res (@$datasets)
+    {
+        print $fh "$res\n";
+    }
+    close($fh);
+    system(qq[mv $fofn.part $fofn]);
+}

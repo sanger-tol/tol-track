@@ -1,0 +1,86 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2023 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use JSON;
+use XML::Simple;
+
+my %ignore = (
+    'fDreABH' => 1,
+    'fDreTuH' => 1,
+);
+
+system('tolqc-status_report');
+my $bioprojects_json = `s3cmd get --quiet s3://tolqc/project/data.json -`;
+my $bioprojects = decode_json($bioprojects_json);
+verify_bioprojects($bioprojects);
+
+exit;
+
+sub verify_bioprojects
+{
+    my ($bioprojects) = @_;
+    foreach my $project (@$bioprojects)
+    {
+        next unless ($project->{CATEGORY} eq 'SPECIES');
+        next unless ($project->{UMBRELLA_ACC});
+        next if (exists $ignore{$project->{TOLID}});
+        my @children = ();
+        print STDERR "checking $project->{TOLID}...\n";
+        foreach my $set (qw(ASM_ACC DATA_ACC COBIONT_ACC))
+        {
+            push(@children, split(/,/, $project->{$set})) if (exists $project->{$set} && $project->{$set});
+        }
+        my $child = join ',', sort @children;
+        my @parents = ();
+        foreach my $set (qw(PARENT_ACC))
+        {
+            push(@parents, split(/,/, $project->{$set})) if (exists $project->{$set} && $project->{$set});
+        }
+        my $parent = join ',', sort @parents;
+
+        my @ena_children = ();
+        my @ena_parents = ();
+        my $txt = `curl -sL https://www.ebi.ac.uk/ena/browser/api/xml/$project->{UMBRELLA_ACC}`;
+        my $xml = XML::Simple->new(KeyAttr => [], ForceArray=>1);
+        my $xmlhash = $xml->XMLin($txt);
+        foreach my $proj (@{$xmlhash->{PROJECT}->[0]->{RELATED_PROJECTS}->[0]->{RELATED_PROJECT}})
+        {
+            if (exists $proj->{CHILD_PROJECT})
+            {
+                push @ena_children,  $proj->{CHILD_PROJECT}->[0]->{accession};
+            }
+            elsif (exists $proj->{PARENT_PROJECT})
+            {
+                push @ena_parents,  $proj->{PARENT_PROJECT}->[0]->{accession};
+            }
+        };
+        my $ena_child = join ",", sort @ena_children;
+        my $ena_parent = join ",", sort @ena_parents;
+
+        print "$project->{TOLID}\t$project->{UMBRELLA_ACC}\tCHILD\t$child\t$ena_child\n" unless ($child eq $ena_child);
+        print "$project->{TOLID}\t$project->{UMBRELLA_ACC}\tPARENT\t$parent\t$ena_parent\n" unless ($parent eq $ena_parent);
+    }
+}

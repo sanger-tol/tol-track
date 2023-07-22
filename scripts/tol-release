@@ -1,0 +1,347 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2022 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use Carp;
+use JSON;
+use File::Basename;
+
+my $opts = parse_params();
+
+system('tolqc-status_report') if ($$opts{load});
+
+my $status_json = `s3cmd get --quiet s3://tolqc/status/hash.json -`;
+my $status = decode_json($status_json);
+my $status_pre = {};
+while (my ($tolid, $value) = each %$status)
+{
+    my $tolpre = $tolid;
+    $tolpre =~ s/\d+$//;
+    $$status_pre{$tolpre} = $value;
+}
+
+my $bioprojects_json = `s3cmd get --quiet s3://tolqc/project/hash.json -`;
+my $bioprojects = decode_json($bioprojects_json);
+
+my $raw_data;
+$raw_data = read_data($raw_data, qq[$ENV{TOLQCROOT}/track/tol_illumina_data.fofn]);
+$raw_data = read_data($raw_data, qq[$ENV{TOLQCROOT}/track/tol_pacbio_data.fofn]);
+
+my $datasub_json = `s3cmd get --quiet s3://tolqc/data/hash.json -`;
+my $datasub = decode_json($datasub_json);
+
+my %asg_hubs =
+(
+    'GHC' => 1,
+    'NSU' => 1,
+    'UDUK' => 1,
+    'DU' => 1,
+    'UOBC' => 1,
+    'VIEC' => 1,
+    'QMOUL' => 1,
+    'SL' => 1,
+    'VIEM' => 1,
+    'URI' => 1,
+    'SENCK' => 1,
+    'PORT' => 1,
+    'UOREG' => 1,
+    'UCALI' => 1,
+);
+
+my %umbrellas =
+(
+    'darwin' => 'PRJEB40665',
+    'vgp' => 'PRJNA489243',
+    'vgp_orders' => 'PRJNA489243',
+    'vgp_plus' => 'PRJNA489243',
+    'asg' => 'PRJEB43743',
+    'tol' => 'PRJEB43745',
+    '25g' => 'PRJEB33226',
+    'badass' => 'PRJEB51690',
+    'erga' => 'PRJEB47820'
+);
+
+
+if ($$opts{input} eq '-')
+{
+    if ($$opts{data})
+    {
+        print join "\t", qw(file filename species taxon library_type sanger_id tolid biosample biospecimen bioproject);
+        print "\n";
+    }
+    while(my $tolid = <>)
+    {
+        chomp $tolid;
+        get_bioprojects($opts,$tolid) if ($$opts{study});
+        get_raw_data($opts,$tolid) if ($$opts{data});
+    }
+}
+else
+{
+    get_bioprojects($opts,$$opts{input}) if ($$opts{study});
+    get_raw_data($opts,$$opts{input}) if ($$opts{data});
+}
+
+exit;
+
+#--------------------------------
+
+sub error
+{
+    my (@msg) = @_;
+    if ( scalar @msg ) { confess @msg; }
+    die
+        "About: Prepare and release BioProjects and raw data for ToL\n",
+        "Usage: tol-release study|data [options] <tolid>\n",
+        "Options:\n",
+        "   -l, --load         load from informatics spreadsheet\n",
+        "   -h, --help         this help message.\n",
+        "\n";
+}
+
+
+sub parse_params
+{
+    my $opts = {
+        input => '-',
+        study => 0,
+        data => 0,
+        load => 0,
+    };
+    while (defined(my $arg=shift(@ARGV)))
+    {
+        if ( $arg eq 'study' || $arg eq 'data' ) { $$opts{$arg} = 1; next; }
+        if ( $arg eq '-l' || $arg eq '--load' ) { $$opts{load} = 1; next; }
+        if ( $arg eq '-?' || $arg eq '-h' || $arg eq '--help' ) { error(); }
+        if (scalar @ARGV == 0) { $$opts{input} = $arg; next; }
+        error("Unknown parameter \"$arg\". Run -h for help.\n");
+    }
+    error() if ($$opts{input} eq '-' && -t STDIN);
+    error("Must select one of 'study' or 'data'") unless ($$opts{study} || $$opts{data});
+    error("Select only one of 'study' or 'data'") if ($$opts{study} && $$opts{data});
+    return $opts;
+}
+
+
+
+sub get_bioprojects
+{
+    my ($opts, $tolid) = @_;
+    next if ($tolid =~ /^#/);
+    my $tolpre = $tolid;
+    $tolpre =~ s/\d+$//;
+    my $data = $$status{$tolid};
+
+    my $collab = '';
+    if ($$opts{load} && exists $$bioprojects{$tolpre})
+    {
+        my $rec = $$bioprojects{$tolpre};
+        print join "\t", (
+            $$rec{TOLID},
+            $$rec{ASM_ACC},
+            $$rec{SPECIES},
+            $$rec{COMMONNAME},
+            $$rec{COLLABORATOR},
+            $$rec{TAXID},
+            $$rec{PARENT_ACC},
+            $$rec{DATA_ACC},
+            $$rec{UMBRELLA_ACC},
+            $$rec{COBIONT_ACC}
+        );
+        print "\n";
+        $$data{data_accession} = $$rec{DATA_ACC};
+    }
+    else
+    {
+        my $umbrella = get_projects($data);
+        if ($umbrella =~ /PRJEB43743/)
+        {
+            my $specimen = $$data{accession};
+            $specimen =~ s/\d+$//;
+            if (exists $asg_hubs{$specimen})
+            {
+                $collab = $specimen;
+            }
+            # TODO: get ERGA collaborators from Biosample records
+        }
+        print STDERR qq[WARN: existing bioproject for '$tolpre': '$$bioprojects{$tolpre}{UMBRELLA_ACC}'\n] if (exists $$bioprojects{$tolpre});
+        # TOLID   ASM_ACC SPECIES COMMONNAME  COLLABORATOR    TAXID   PARENT_ACC  DATA_ACC    UMBRELLA_ACC    COBIONT_ACC
+        my @record = ($tolpre, '', $$data{species}, $$data{common_name}, $collab, $$data{taxon_id}, $umbrella, '', '', '');
+        print join "\t", @record;
+        print "\n";
+    }
+}
+
+sub get_raw_data
+{
+    my ($opts, $tolid) = @_;
+    next if ($tolid =~ /^#/);
+    my $tolpre = $tolid;
+    $tolpre =~ s/\d+$//;
+    my $data = $$status_pre{$tolpre};
+
+    if ($$opts{load} && exists $$datasub{$tolpre})
+    {
+        my $rec = $$datasub{$tolpre};
+        foreach my $rec (@{$$datasub{$tolpre}})
+        {
+            next if ($$rec{released});
+            print join "\t", (
+                $$rec{file},
+                $$rec{filename},
+                $$rec{species},
+                $$rec{taxon},
+                $$rec{library_type},
+                $$rec{sanger_id},
+                $$rec{tolid},
+                $$rec{biosample},
+                $$rec{biospecimen},
+                $$rec{bioproject},
+            );
+            print "\n";
+        }
+    }
+    else
+    {
+        my %seen;
+        foreach my $rec (@{$$raw_data{$tolpre}})
+        {
+            my $dir = dirname($$rec{file});
+            my $filename = '';
+            if (exists $$rec{movie})
+            {
+                next if ($$rec{file} =~ /subreads/);
+                next if (exists $seen{$dir});
+                $seen{$dir}++;
+                unless ($$rec{file} =~ /$$rec{movie}/)
+                {
+                    my ($suff) = $$rec{file} =~ m/(bc[12].+.bam)/;
+                    $filename = "$$rec{movie}.ccs.$suff";
+                }
+                $$rec{pipeline} = movie2pipeline($$rec{run}, $$rec{well}, $$rec{tag_index});
+            }
+            print join "\t", ($$rec{file}, $filename, $$data{species}, $$data{taxon_id}, $$rec{pipeline}, $$rec{sample}, $$rec{tolid}, $$rec{biosample}, $$rec{biospecimen}, $$bioprojects{$tolpre}->{DATA_ACC});
+            print "\n";
+        }
+    }
+}
+
+
+sub get_projects
+{
+    my ($data) = @_;
+    my @projects = ();
+    while (my ($key, $value) = each %$data)
+    {
+        if ($key =~ /^project/ && $value eq '1')
+        {
+            my ($proj) = $key =~ m/project\.(\S+)$/;
+            if (exists $umbrellas{$proj})
+            {
+                push @projects, $umbrellas{$proj};
+            }
+        }
+    }
+    return join ',', sort @projects;
+}
+
+sub read_data
+{
+    my ($data, $file) = @_;
+    $file = qq[$file.part] if (-s qq[$file.part]);
+    my @head;
+    my $tolidx;
+    open my $fh, "<$file";
+    while (<$fh>)
+    {
+        chomp;
+        my @F = split /\t/;
+        next unless @F;
+        if ($tolidx)
+        {
+            my $tolid = $F[$tolidx];
+            $tolid =~ s/\d+$//;
+            my %element;
+            for (my $i = 0; $i < scalar @head; $i++)
+            {
+                my $val = shift @F;
+                $element{$head[$i]} = defined $val ? $val : '';
+            }
+            if (exists $element{manual_qc} && $element{manual_qc} eq '0')
+            {
+                # don't include data that has failed NPG QC
+                next;
+            }
+            if (exists $element{run_status} && $element{run_status} ne 'qc complete')
+            {
+                # don't include data that has not yet been QC'd by NPG
+                next;
+            }
+            push @{$$data{$tolid}}, \%element;
+        }
+        else
+        {
+            @head = @F;
+            my $idx = 0;
+            foreach my $val (@F)
+            {
+                $tolidx = $idx if ($val eq 'tolid');
+                $idx++;
+            }
+        }
+    }
+    close($fh);
+    return $data;
+}
+
+sub movie2pipeline
+{
+    my ($run, $well, $tag_index) = @_;
+    my $hash = {};
+    my $tolqc = $ENV{TOLQCROOT};
+    $tag_index = 'NULL' unless ($tag_index);
+    $well =~ s/0//;
+
+    my %pipeline_map = (
+        'PacBio_Ultra_Low_Input' => 'PacBio - HiFi (ULI)',
+        'PacBio_Ultra_Low_Input_mplx' => 'PacBio - HiFi (ULI)',
+        'Pacbio_HiFi' => 'PacBio - HiFi',
+        'Pacbio_HiFi_mplx' => 'PacBio - HiFi',
+        'PacBio_IsoSeq_mplx' => 'PacBio - IsoSeq'
+    );
+    my $pipeline = '';
+    my $lims = -s "$tolqc/track/tol_pacbio_data.lims.tsv.part" ? "$tolqc/track/tol_pacbio_data.lims.tsv.part" : "$tolqc/track/tol_pacbio_data.lims.tsv";
+    open my $fh, qq[awk -F"\\t" '\$12=="$run" && \$13=="$well" && \$9~/$tag_index/' $lims |];
+    while (<$fh>)
+    {
+        chomp;
+        my @F = split /\t/;
+        $pipeline = (scalar @F>=16 && exists $pipeline_map{"$F[15]"}) ? $pipeline_map{"$F[15]"} : $F[15];
+        $pipeline = 'PacBio - HiFi' if ($pipeline eq 'NULL');
+    }
+    close($fh);
+    return $pipeline;
+}
+

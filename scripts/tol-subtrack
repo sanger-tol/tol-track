@@ -1,0 +1,282 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2021 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use DateTime;
+use File::Basename;
+use JSON;
+use File::Temp qw/ tempfile tempdir /;
+
+my $accessions = load_accessions(qq[$ENV{TOLQCROOT}/track/tol_subtrack.fofn]);
+my $new = {};
+my $map = load_name_mapping();
+update_accession($accessions, qq[$ENV{TOLQCROOT}/track/tol_subtrack_pending.fofn]);
+update_accession($accessions, qq[$ENV{TOLQCROOT}/track/tol_illumina_data.fofn]);
+update_accession($accessions, qq[$ENV{TOLQCROOT}/track/tol_pacbio_data.fofn]);
+update_accession($accessions, qq[$ENV{TOLQCROOT}/track/tol_pacbio_data.rsii.fofn]);
+update_accession($accessions, qq[$ENV{TOLQCROOT}/track/tol_subtrack_external.fofn]);
+append_accession($accessions, qq[$ENV{TOLQCROOT}/track/tol_subtrack_untracked.fofn]);
+dump_accessions($accessions,qq[$ENV{TOLQCROOT}/track/tol_subtrack.fofn]);
+update_subtrack_pending($accessions,qq[$ENV{TOLQCROOT}/track/tol_subtrack_pending.fofn]);
+new_submissions($new,'sm15@sanger.ac.uk');
+update_tolqc($accessions,'s3://tolqc/pacbio/data.json');
+update_tolqc($accessions,'s3://tolqc/illumina/data.json');
+
+exit;
+
+sub load_accessions
+{
+    my ($file) = @_;
+    my $accessions = {};
+    if (-s $file)
+    {
+        open(my $fh, "<$file") || die("Could not open file $file");
+        while(<$fh>)
+        {
+            chomp;
+            my ($file,$run,$exp,$study,$sample,$date) = split /\t/;
+            $$accessions{$file} = { run => $run, exp => $exp, study => $study, sample => $sample, date => $date };
+        }
+        close $fh;
+    }
+    return $accessions;
+}
+
+sub load_name_mapping
+{
+    my $map;
+    my $cmd = qq[mysql --login-path=mlims $ENV{MLIMS_DATABASE} -e '
+SELECT file,filename FROM tol_sample_bioproject WHERE filename IS NOT NULL;'];
+
+    open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
+    while(<$sqh>)
+    {
+        chomp;
+        next if /^file/;
+        my ($file,$filename) = split /\t/;
+        $$map{$file} = $filename;
+    }
+    close($sqh);
+    return $map;
+}
+
+sub update_accession
+{
+    my ($accessions,$fofn) = @_;
+    open(my $fh, "<$fofn") || die("Could not open file $fofn");
+    while (my $line = <$fh>)
+    {
+        chomp $line;
+        my ($file) = split /\t/, $line;
+        next unless $file;
+        next if (exists $$accessions{$file});
+        my $base = exists $$map{$file} ? $$map{$file} : basename($file);
+        if ($base =~ m/[pX]0\.subreads\.bam$/)
+        {
+            $base =~ s/subreads\.bam$/1.bax.h5/;
+        }
+        if (exists $$map{$file})
+        {
+            $file = dirname($file) . '/' . $$map{$file};
+        }
+        next if (exists $$accessions{$file});
+        my $run = "";
+        my $exp = "";
+        my $study = "";
+        my $sample = "";
+        my $date = "1900-01-01";
+        open(my $qh, "perl -I/software/badger/lib/perl5/ /software/badger/bin/submission_lookup -file $base |") || die("Could not open submission_lookup");
+        while(<$qh>)
+        {
+            chomp;
+            if (m/run_accession (\S+)/) { $run = $1; };
+            if (m/experiment_accession (\S+)/) { $exp = $1; };
+            if (m/study_accession (\S+)/) { $study = $1; };
+            if (m/sample_accession (\S+)/) { $sample = $1; };
+            if (m/submission_time (\d+)/) { $date = DateTime->from_epoch( epoch => $1 )->ymd; };
+        }
+        close($qh);
+        next unless ($run && $exp && $study && $sample && $date);
+        $$accessions{$file} = { run => $run, exp => $exp, study => $study, sample => $sample, date => $date };
+        $$new{$file} = { run => $run, exp => $exp, study => $study, sample => $sample, date => $date };
+    }
+    close($fh);
+    return $accessions;
+}
+
+sub update_subtrack_pending
+{
+    my ($accessions,$fofn) = @_;
+    my $pending;
+    my $cmd = qq[mysql --login-path=mlims $ENV{MLIMS_DATABASE} -e '
+SELECT file,biosample_accession,bioproject_accession,date_updated FROM tol_sample_bioproject;'];
+
+    open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
+    while(<$sqh>)
+    {
+        chomp;
+        next if /^file/;
+        my ($file,$sample,$study,$date) = split /\t/;
+        $date =~ s/ .*//;
+        if (exists $$map{$file})
+        {
+            $file = dirname($file) . '/' . $$map{$file};
+        }
+        next if (exists $$accessions{$file});
+        $$pending{$file} = { run => 'pending', exp => 'pending', study => $study, sample => $sample, date => $date };
+    }
+    close($sqh);
+    dump_accessions($pending,$fofn);
+}
+
+sub append_accession
+{
+    my ($accessions,$fofn) = @_;
+    open(my $fh, "<$fofn") || die("Could not open file $fofn");
+    while (my $line = <$fh>)
+    {
+        chomp $line;
+        my ($file, $run, $exp, $study, $sample, $date) = split(/\t/, $line);
+        next if (exists $$accessions{$file});
+        $$accessions{$file} = { run => $run, exp => $exp, study => $study, sample => $sample, date => $date };
+        $$new{$file} = { run => $run, exp => $exp, study => $study, sample => $sample, date => $date };
+    }
+    close($fh);
+}
+
+sub dump_accessions
+{
+    my ($accessions,$fofn) = @_;
+    open(my $fh, ">$fofn.part") || die("Could not write to file $fofn.part");
+    foreach my $file (sort keys %$accessions)
+    {
+        my $res = $$accessions{$file};
+        print $fh "$file\t$$res{run}\t$$res{exp}\t$$res{study}\t$$res{sample}\t$$res{date}\n";
+        if (exists $$map{$file})
+        {
+            print $fh "$$map{$file}\t$$res{run}\t$$res{exp}\t$$res{study}\t$$res{sample}\t$$res{date}\n";
+        }
+    }
+    close($fh);
+    system(qq[mv $fofn.part $fofn]);
+}
+
+sub new_submissions
+{
+    my ($new,$email) = @_;
+    my $cmd = qq[mysql --login-path=mlims $ENV{MLIMS_DATABASE} -e '
+SELECT file,tolid,library_type FROM tol_sample_bioproject;'];
+
+    if (keys %$new)
+    {
+        my $data;
+        open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
+        while(<$sqh>)
+        {
+            chomp;
+            next if /^file/;
+            my ($file,$tolid,$library) = split /\t/;
+            if (exists $$map{$file})
+            {
+                $file = dirname($file) . '/' . $$map{$file};
+            }
+            next if (exists $$data{$file});
+            $$data{$file} = { tolid => $tolid, library_type => $library } ;
+        }
+        close($sqh);
+
+        my $new_txt = '';
+        my $seen;
+        foreach my $file (keys %{$new})
+        {
+            next unless (exists $$data{$file});
+            next if (exists $$seen{"$$data{$file}{tolid} $$data{$file}{library_type}"});
+            $new_txt .= qq[$$data{$file}{tolid}\t$$data{$file}{library_type}\n];
+            $$seen{"$$data{$file}{tolid} $$data{$file}{library_type}"} = 1;
+        }
+        send_email($email, "new tol data submitted to ENA", $new_txt) if ($new_txt);
+    }
+}
+
+sub update_tolqc
+{
+    my ($acc,$data) = @_;
+
+    my $acc2 = {};
+    while (my ($file, $value) = each %{$acc})
+    {
+        my $base = basename($file);
+        $base =~ s/\.reads.bam$/.ccs.bam/;
+        $base =~ s/\.hifi_reads/.ccs/;
+        $$acc2{$base} = $value;
+    }
+
+    my $json = `s3cmd get --quiet $data -`;
+    my $input = decode_json($json);
+    my $output;
+    foreach my $rec (@$input)
+    {
+        my $file = exists $$rec{input} ? basename($$rec{input}) : qq[$$rec{run}.cram];
+        if ($data =~ /pacbio/)
+        {
+            $file =~ s/stats$/bam/;
+            $file =~ s/\.reads.bam$/.ccs.bam/;
+            $file =~ s/\.hifi_reads/.ccs/;
+            $file =~ s/\.rmdup//;
+        }
+        elsif ($data =~ /illumina/)
+        {
+            $file =~ s/stats$/cram/;
+        }
+        if (exists $$acc2{$file})
+        {
+            $$rec{run_accession} = $$acc2{$file}->{run};
+            $$rec{exp_accession} = $$acc2{$file}->{exp};
+            $$rec{accession_number} = $$acc2{$file}->{sample};
+            $$rec{study_accession} = $$acc2{$file}->{study};
+            $$rec{submission_date} = $$acc2{$file}->{date};
+        }
+        push @$output, $rec;
+    }
+    my $json_out = encode_json($output);
+    write_file_to_s3($json_out,$data);
+}
+
+sub write_file_to_s3
+{
+    my ($json,$file) = @_;
+    my ($fh, $jsonfile) = tempfile();
+    print $fh $json;
+    close $fh;
+    system(qq[s3cmd --quiet --acl-public put $jsonfile $file]);
+}
+
+sub send_email
+{
+    my ($email, $subject, $msg) = @_;
+    open(my $mh,"| /usr/bin/mutt -s '$subject' $email");
+    print $mh "$msg\n";
+    close($mh);
+}
