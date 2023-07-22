@@ -1051,6 +1051,7 @@ CREATE TABLE `species` (
   `taxon_id` mediumint(8) DEFAULT NULL,
   `taxon_family` varchar(40) DEFAULT NULL,
   `taxon_order` varchar(40) DEFAULT NULL,
+  `taxon_phylum` varchar(40) DEFAULT NULL,
   `taxon_group` varchar(40) DEFAULT NULL,
   `genome_size` float unsigned DEFAULT NULL,
   `chromosome_number` mediumint(8) DEFAULT NULL,
@@ -1075,8 +1076,10 @@ CREATE TABLE `specimen` (
   `species_id` mediumint(8) unsigned DEFAULT NULL,
   `lims_id` varchar(255) NOT NULL DEFAULT '',
   `supplier_name` varchar(40) NOT NULL DEFAULT '',
-  `accession` varchar(40) DEFAULT NULL,
-  `sex` enum('MALE','FEMALE','HERMAPHRODITE_MONOECIOUS','NOT_COLLECTED','NOT_APPLICABLE','NOT_PROVIDED','ASEXUAL_MORPH','SEXUAL_MORPH') DEFAULT 'NOT_PROVIDED',
+  `accession_id` int(10) unsigned NOT NULL DEFAULT 0,
+  `sex_id` smallint(5) unsigned DEFAULT NULL,
+  `ploidy` int(1) unsigned NOT NULL DEFAULT 0,
+  `karyotype` varchar(255) NOT NULL DEFAULT '',
   `father_id` int(10) unsigned DEFAULT NULL,
   `mother_id` int(10) unsigned DEFAULT NULL,
   `note_id` mediumint(8) unsigned DEFAULT NULL,
@@ -1085,6 +1088,18 @@ CREATE TABLE `specimen` (
   PRIMARY KEY (`row_id`),
   UNIQUE KEY `name` (`name`),
   KEY  (`specimen_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+--
+-- Table structure for table `sex`
+--
+
+DROP TABLE IF EXISTS `sex`;
+CREATE TABLE `sex` (
+  `sex_id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL DEFAULT '',
+  PRIMARY KEY  (`sex_id`),
+  UNIQUE KEY `name` (`name`),
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 --
@@ -1097,7 +1112,7 @@ CREATE TABLE `project` (
   `name` varchar(255) NOT NULL DEFAULT '',
   `hierarchy_name` varchar(255) NOT NULL DEFAULT '',
   `lims_id` varchar(255) NOT NULL DEFAULT '',
-  `accession` varchar(40) NOT NULL DEFAULT '',
+  `accession_id` int(10) unsigned NOT NULL DEFAULT 0,
   PRIMARY KEY  (`project_id`),
   UNIQUE KEY `name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
@@ -1110,6 +1125,7 @@ DROP TABLE IF EXISTS `allocation`;
 CREATE TABLE `allocation` (
   `project_id` smallint(5) unsigned NOT NULL DEFAULT '0',
   `specimen_id` int(10) unsigned NOT NULL DEFAULT '0',
+  `is_primary` tinyint(1) DEFAULT '0',
   PRIMARY KEY (`project_id`,`specimen_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
@@ -1125,7 +1141,7 @@ CREATE TABLE `sample` (
   `hierarchy_name` varchar(40) NOT NULL DEFAULT '',
   `specimen_id` smallint(5) unsigned DEFAULT NULL,
   `lims_id` mediumint(8) unsigned DEFAULT NULL,
-  `accession` varchar(40) NOT NULL DEFAULT '',
+  `accession_id` int(10) unsigned NOT NULL DEFAULT 0,
   `note_id` mediumint(8) unsigned DEFAULT NULL,
   `changed` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `current` tinyint(1) DEFAULT '0',
@@ -1166,6 +1182,9 @@ DROP TABLE IF EXISTS `library_type`;
 CREATE TABLE `library_type` (
   `library_type_id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(255) NOT NULL DEFAULT '',
+  `hierarchy_name` varchar(255) NOT NULL DEFAULT '',
+  `kit` varchar(255) NOT NULL DEFAULT '',
+  `enzyme` varchar(255) NOT NULL DEFAULT '',
   PRIMARY KEY  (`library_type_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
@@ -1179,22 +1198,25 @@ CREATE TABLE `seq` (
   `seq_id` mediumint(8) unsigned NOT NULL DEFAULT 0,
   `sample_id` int(10) NOT NULL DEFAULT '0',
   `library_id` int(10) NOT NULL DEFAULT '0',
+  `accession_id` int(10) unsigned NOT NULL DEFAULT 0,
+  `run_id` int(10) NOT NULL DEFAULT '0',
   `name` varchar(255) NOT NULL DEFAULT '',
   `hierarchy_name` varchar(255) NOT NULL DEFAULT '',
-  `acc` varchar(40) DEFAULT NULL,
-  `ss_qc_status` enum('pending','pass','fail','-') DEFAULT 'pending',
   `processed` int(10) DEFAULT 0,
+  `tag1_id` varchar(40) DEFAULT NULL,
+  `tag2_id` varchar(40) DEFAULT NULL,
+  `lims_qc_status` enum('pending','pass','fail','-') DEFAULT 'pending',
   `auto_qc_status` enum('no_qc','passed','failed') DEFAULT 'no_qc',
-  `qc_status` enum('no_qc','pending','passed','failed','gt_pending','investigate') DEFAULT 'no_qc',
+  `qc_status` enum('no_qc','pending','passed','failed','investigate') DEFAULT 'no_qc',
   `withdrawn` tinyint(1) DEFAULT NULL,
   `manually_withdrawn` tinyint(1) DEFAULT NULL,
+  `date` datetime DEFAULT NULL,
   `note_id` mediumint(8) unsigned DEFAULT NULL,
   `changed` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `run_date` datetime DEFAULT NULL,
   `current` tinyint(1) DEFAULT '0',
   PRIMARY KEY (`row_id`),
-  KEY `lane_id` (`seq_id`),
-  KEY `lanename` (`name`),
+  KEY `seq_id` (`seq_id`),
+  KEY `seqname` (`name`),
   KEY `library_id` (`library_id`),
   KEY `sample_id` (`sample_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
@@ -1206,26 +1228,18 @@ CREATE TABLE `seq` (
 DROP TABLE IF EXISTS `run`;
 CREATE TABLE `run` (
   `row_id` int unsigned NOT NULL AUTO_INCREMENT,
-  `seq_id` mediumint(8) unsigned NOT NULL DEFAULT 0,
-  `sample_id` int(10) NOT NULL DEFAULT '0',
-  `library_id` int(10) NOT NULL DEFAULT '0',
+  `run_id` mediumint(8) unsigned NOT NULL DEFAULT 0,
   `name` varchar(255) NOT NULL DEFAULT '',
   `hierarchy_name` varchar(255) NOT NULL DEFAULT '',
-  `ss_qc_status` enum('pending','pass','fail','-') DEFAULT 'pending',
-  `processed` int(10) DEFAULT 0,
-  `auto_qc_status` enum('no_qc','passed','failed') DEFAULT 'no_qc',
-  `qc_status` enum('no_qc','pending','passed','failed','gt_pending','investigate') DEFAULT 'no_qc',
-  `withdrawn` tinyint(1) DEFAULT NULL,
-  `manually_withdrawn` tinyint(1) DEFAULT NULL,
-  `note_id` mediumint(8) unsigned DEFAULT NULL,
+  `platform_id` int(10) NOT NULL DEFAULT '0',
+  `centre_id` int(10) NOT NULL DEFAULT '0',
+  `lims_id` int(10) NOT NULL DEFAULT '0',
+  `element` tinyint(1) DEFAULT NULL,
   `changed` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `run_date` datetime DEFAULT NULL,
   `current` tinyint(1) DEFAULT '0',
   PRIMARY KEY (`row_id`),
   KEY `seq_id` (`seq_id`),
-  KEY `runname` (`name`),
-  KEY `library_id` (`library_id`),
-  KEY `sample_id` (`sample_id`)
+  KEY `runname` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 --
@@ -1255,20 +1269,20 @@ CREATE TABLE `platform` (
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 --
--- Table structure for table `submission`
+-- Table structure for table `accession`
 --
-DROP TABLE IF EXISTS `submission`;
+DROP TABLE IF EXISTS `accession`;
 CREATE TABLE `submission` (
-  `submission_id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
-  `date` datetime NOT NULL DEFAULT '0000-00-00',
+  `accession_id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(255) NOT NULL DEFAULT '',
-  `accession` varchar(40) DEFAULT NULL,
-  `accession_secondary` varchar(40) DEFAULT NULL,
-  `accession_submission` varchar(40) DEFAULT NULL,
+  `type` enum('project','seq','asm','sample','specimen') DEFAULT 'seq',
+  `date` datetime NOT NULL DEFAULT '0000-00-00',
+  `secondary` varchar(255) DEFAULT NULL,
+  `title` varchar(255) DEFAULT NULL,
+  `description` varchar(255) DEFAULT NULL,
   PRIMARY KEY  (`submission_id`),
-  UNIQUE KEY `accession` (`accession`)
+  UNIQUE KEY `accession_id` (`accession_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
 
 --
 -- Views

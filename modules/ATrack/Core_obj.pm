@@ -8,7 +8,7 @@ ATrack::Core_obj - Assembly Tracking Core_obj object
 
 =head1 DESCRIPTION
 
-This is the superclass of the core objects (Project, Sample, Library, Seq) in
+This is the superclass of the core objects (Project, Specimen, Sample, Library, Seq) in
 ATrack, and implements some common methods.
 
 The primary feature of a core object is that it has a history and concept of a

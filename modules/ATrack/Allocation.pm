@@ -7,7 +7,7 @@ ATrack::Allocation - Specimen/Project Allocation object
 =head1 SYNOPSIS
     my $alloc = ATrack::Allocation->new($atrack);
     $alloc->add_allocation($project,$specimen);
-    $alloc->get_projects_for_specimens($specimen);
+    $alloc->get_projects_for_specimen($specimen);
     $alloc->get_specimens_for_project($project);
 
 =head1 DESCRIPTION

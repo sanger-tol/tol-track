@@ -76,9 +76,9 @@ sub fields_dispatch
         species_id          => sub { $self->species_id(@_) },
         lims_id             => sub { $self->lims_id(@_) },
         name                => sub { $self->name(@_) },
-        # hierarchy_name      => sub { $self->hierarchy_name(@_) },
+        hierarchy_name      => sub { $self->hierarchy_name(@_) },
         supplier_name       => sub { $self->supplier_name(@_) },
-        accession           => sub { $self->accession(@_) },
+        accession_id        => sub { $self->accession_id(@_) },
         sex                 => sub { $self->sex(@_) },
         father_id           => sub { $self->father_id(@_) },
         mother_id           => sub { $self->mother_id(@_) },
@@ -222,20 +222,20 @@ sub sex
 }
 
 
-=head2 accession
+=head2 accession_id
 
-  Arg [1]    : accession (optional)
-  Example    : my $acc = $study->accession();
-               $specimen->accession('ERS000090');
-  Description: Get/Set for specimen accession, i.e. SRA/ERA sample id
+  Arg [1]    : accession_id (optional)
+  Example    : my $acc = $study->accession_id();
+               $specimen->accession_id('ERS000090');
+  Description: Get/Set for specimen accession_id, i.e. id for the accession table
   Returntype : string
 
 =cut
 
-sub accession
+sub accession_id
 {
     my $self = shift;
-    return $self->_get_set('accession', 'string', @_);
+    return $self->_get_set('accession_id', 'number', @_);
 }
 
 =head2 species_id

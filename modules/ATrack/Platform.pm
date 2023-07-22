@@ -132,7 +132,7 @@ sub create
 
   Arg [1]    : name (optional)
   Example    : my $name = $platform->name();
-               $platform->name('SLX');
+               $platform->name('PacBio');
   Description: Get/Set for platform name
   Returntype : string
 

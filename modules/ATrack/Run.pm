@@ -165,115 +165,6 @@ sub library_id
 =cut
 
 
-=head2 accession
-
-  Arg [1]    : accession (optional)
-  Example    : my $accession = $seq->accession();
-           $seq->accession('ERR0000538');
-  Description: Get/Set for [ES]RA/DCC accession
-  Returntype : string
-
-=cut
-
-sub accession
-{
-    my $self = shift;
-    return $self->_get_set('accession', 'string', @_);
-}
-
-
-=head2 is_withdrawn
-
-  Arg [1]    : boolean for is_withdrawn status
-  Example    : $seq->is_withdrawn(1);
-  Description: Get/Set for whether seq has been withdrawn or not
-  Returntype : boolean (undef if withdrawn status had never been set)
-
-=cut
-
-sub is_withdrawn
-{
-    my $self = shift;
-    return $self->_get_set('is_withdrawn', 'boolean', @_);
-}
-
-
-=head2 is_manually_withdrawn
-
-  Arg [1]    : boolean for is_manually_withdrawn status
-  Example    : $seq->is_manually_withdrawn(1);
-  Description: Get/Set for whether seq has been manually withdrawn or not;
-               The distinction between this and is_withdrawn is that a seq that
-               is manually withdrawn won't be automatically unwithdrawn by some
-               automated system that checks this value.
-  Returntype : boolean (undef if withdrawn status had never been set)
-
-=cut
-
-sub is_manually_withdrawn
-{
-    my $self = shift;
-    my $withdrawn = $self->_get_set('is_manually_withdrawn', 'boolean', @_);
-    if (defined $withdrawn)
-    {
-        $self->is_withdrawn($withdrawn);
-    }
-    return $withdrawn;
-}
-
-=head2 auto_qc_status
-
-  Arg [1]    : auto_qc_status (optional)
-  Example    : my $qc_status = $seq->auto_qc_status();
-           $seq->auto_qc_status('passed');
-  Description: Get/Set for seq auto_qc_status
-  Returntype : string
-
-=cut
-
-sub auto_qc_status
-{
-    my $self = shift;
-    $self->_check_status_value('auto_qc_status', @_);
-    return $self->_get_set('auto_qc_status', 'string', @_);
-}
-
-
-=head2 qc_status
-
-  Arg [1]    : qc_status (optional)
-  Example    : my $qc_status = $seq->qc_status();
-           $seq->qc_status('passed');
-  Description: Get/Set for seq qc_status
-  Returntype : string
-
-=cut
-
-sub qc_status
-{
-    my $self = shift;
-    $self->_check_status_value('qc_status', @_);
-    return $self->_get_set('qc_status', 'string', @_);
-}
-
-
-=head2 lims_qc_status
-
-  Arg [1]    : lims_qc_status (optional)
-  Example    : my $lims_qc_status = $seq->lims_qc_status();
-           $seq->lims_qc_status('pass');
-  Description: Get/Set for seq lims_qc_status. This is the manual QC from LIMS.
-  Returntype : string
-
-=cut
-
-sub lims_qc_status
-{
-    my $self = shift;
-    $self->_check_status_value('lims_qc_status', @_);
-    return $self->_get_set('lims_qc_status', 'string', @_);
-}
-
 =head2 run_date
 
   Arg [1]    : run_date (optional)
@@ -306,7 +197,7 @@ sub run_date
 
   Arg [1]    : centre name (optional)
   Example    : my $centre = $library->centre();
-               $library->centre('SC');
+               $library->centre('WSI');
   Description: Get/Set for sample centre.  Lazy-loads centre object from $self->centre_id.  If a centre name is supplied, then centre_id is set to the corresponding centre in the database.  If no such centre exists, returns undef.  Use add_centre to add a centre in this case.
   Returntype : ATrack::Centre object
 
@@ -324,7 +215,7 @@ sub centre
   Arg [1]    : centre name
   Example    : my $seq_centre = $library->add_centre('WSI');
   Description: create a new centre, and if successful, return the object
-  Returntype : ATrack::Library object
+  Returntype : ATrack::Centre object
 
 =cut
 
@@ -333,6 +224,46 @@ sub add_centre
     my $self = shift;
     return $self->_create_child_object('get_centre_by_name', 'ATrack::Centre', @_);
 }
+
+
+
+
+
+=head2 platform
+
+  Arg [1]    : platform name (optional)
+  Example    : my $centre = $library->platform();
+               $library->platform('PacBio');
+  Description: Get/Set for sample centre.  Lazy-loads centre object from $self->centre_id.  If a centre name is supplied, then centre_id is set to the corresponding centre in the database.  If no such centre exists, returns undef.  Use add_centre to add a centre in this case.
+  Returntype : ATrack::Platform object
+
+=cut
+
+sub platform
+{
+    my $self = shift;
+    return $self->_get_set_child_object('get_platform_by_name', 'ATrack::Platform', @_);
+}
+
+
+=head2 add_platform
+
+  Arg [1]    : platform name
+  Example    : my $platform = $library->add_platform('PacBio');
+  Description: create a new platform, and if successful, return the object
+  Returntype : ATrack::Platform object
+
+=cut
+
+sub add_centre
+{
+    my $self = shift;
+    return $self->_create_child_object('get_platform_by_name', 'ATrack::Centre', @_);
+}
+
+
+
+
 
 
 =head2 descendants
@@ -346,7 +277,7 @@ sub add_centre
 
 sub _get_child_methods
 {
-    return qw(files mappings);
+    return qw(seqs);
 }
 
 1;
