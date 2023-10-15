@@ -49,6 +49,11 @@ my %ignore = (
     'PRJEB51577' => 1,
 );
 
+my %rename_map = (
+    'PRJEB57375' => 'ilYpoCagn',
+    'PRJEB57376' => 'ilYpoCagn',
+);
+
 # get bioprojects data from the informatics spreadsheet
 system('tolqc-status_report');
 my $bioprojects_json = `s3cmd get --quiet s3://tolqc/project/data.json -`;
@@ -80,6 +85,7 @@ select ebi_study_acc,name from assembly_info where analysis_type = "ASSE";'];
         next if $project eq 'NULL';
         next if (exists $ignore{$project});
         my ($tolpre,$type) = $name =~ m/^([[:alpha:]]+)\d+(.*)$/;
+        $tolpre = $rename_map{$project} if ($project && exists $rename_map{$project});
         my ($tolid) = $name =~ /^(\S+)/;
         $tolid =~ s/\.\d+$//;
         $type =~ s/\s+$// if ($type);

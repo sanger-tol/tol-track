@@ -158,6 +158,10 @@ WHERE study.id_study_lims in ( "$studies" );'];
             if ($wh_info[3]) { $F[2] = $wh_info[3] if ($F[2] eq 'NULL'); }
             if ($wh_info[4]) { $F[4] = $wh_info[4] if ($F[4] eq 'NULL'); }
         }
+        if ($F[7] =~ /PiMmS/ && $F[15] eq "Pacbio_HiFi\n")
+        {
+            $F[15] = "Pacbio_HiFi_PiMmS\n";
+        }
         print $fh join("\t", @F);
     }
     close($sqh);
@@ -205,6 +209,13 @@ sub load_imported_movies
         $$movies{$_} = 1;
     }
     close($fh);
+    open(my $fh2, qq[for file in `ls $ENV{TOLQCROOT}/data/*/*/*/transcriptomic_data/*/iso-seq/*.bam`; do echo \$(basename \$file) | cut -f1 -d"."; done |]) || die("Could not open list movies");
+    while(<$fh2>)
+    {
+        chomp;
+        $$movies{$_} = 1;
+    }
+    close($fh2);
     return $movies;
 }
 
