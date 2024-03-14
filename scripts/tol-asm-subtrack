@@ -47,6 +47,13 @@ my %ignore = (
     'PRJEB53175' => 1,
     'PRJEB43477' => 1,
     'PRJEB51577' => 1,
+    'PRJEB68178' => 1, # idDroObsc (Laumer)
+    'PRJEB68179' => 1, # idDroObsc (Laumer)
+    'PRJEB68180' => 1, # idDroObsc (Laumer)
+    'PRJEB68181' => 1, # idDroObsc (Laumer)
+    'PRJEB70451' => 1, # odCinAllo created before species confirmed
+    'PRJEB41910' => 1, # suppressed version of ilEreEpip because of rename to ilEreLige
+    'PRJEB41911' => 1, # suppressed version of ilEreEpip because of rename to ilEreLige
 );
 
 my %rename_map = (
@@ -74,6 +81,10 @@ sub load_subtrack
     my $cobionts = decode_json($cobionts_json);
 
     my %load;
+    $load{drCraLaev}->{asm}->{PRJEB67924} = 1;
+    $load{idCulPipi}->{asm}->{PRJEB67968} = 1;
+    $load{ilAphHype}->{asm}->{PRJEB36755} = 1;
+    $load{ilAphHype}->{asm}->{PRJEB36756} = 1;
     my $cmd = qq[mysql -u$ENV{SUBTRACK_USER} -h $ENV{SUBTRACK_HOST} -P$ENV{SUBTRACK_PORT} $ENV{SUBTRACK_DATABASE} -se '
 select ebi_study_acc,name from assembly_info where analysis_type = "ASSE";'];
     open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
