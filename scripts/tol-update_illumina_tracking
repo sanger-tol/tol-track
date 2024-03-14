@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-#    Copyright (C) 2021 Genome Research Ltd.
+#    Copyright (C) 2021-2024 Genome Research Ltd.
 #
 #    Author: Shane McCarthy <sm15@sanger.ac.uk>
 #
@@ -109,132 +109,70 @@ sub update_mlims
 
     my $studies = $$opts{studies};
     my $cmd = qq[mysql --login-path=mlims $ENV{MLIMS_DATABASE} -e '
-SELECT DISTINCT
-    sample.public_name,
-    sample.common_name,
-    flowcell.pipeline_id_lims,
-    sample.name,
-    sample.supplier_name,
-    sample.accession_number,
-    sample.donor_id,
-    sample.taxon_id,
-    sample.description,
-    run_lane_metrics.instrument_model,
-    run_lane_metrics.id_run,
-    flowcell.position,
-    flowcell.tag_index,
-    flowcell.tag_sequence,
-    flowcell.tag2_sequence,
-    run_status_dict.description as run_status,
-    run_status.date,
-    study.id_study_lims as study_id,
-    study.name as study_name,
-    study.reference_genome,
-    flowcell.manual_qc
+SELECT irods.irods_root_collection AS irods_path
+  , irods.irods_data_relative_path AS irods_file
+  , sample.public_name AS tol_specimen_id
+  , sample.common_name AS scientific_name
+  , flowcell.pipeline_id_lims AS pipeline_id_lims
+  , sample.name AS sample_name
+  , sample.supplier_name AS supplier_name
+  , sample.accession_number AS biosample_accession
+  , sample.donor_id AS biospecimen_accession
+  , sample.taxon_id AS taxon_id
+  , sample.description AS description
+  , run_lane_metrics.instrument_model AS instrument_model
+  , CONVERT(product_metrics.id_run, CHAR) AS run_id
+  , CONVERT(product_metrics.position, CHAR) AS position
+  , CONVERT(product_metrics.tag_index, CHAR) AS tag_index
+  , flowcell.tag_sequence AS tag1_sequence
+  , flowcell.tag2_sequence AS tag2_sequence
+  , run_status_dict.description AS run_status
+  , run_status.date AS qc_date
+  , study.id_study_lims AS study_id
+  , study.name AS study_name
+  , product_metrics.qc AS manual_qc
+FROM study
+JOIN iseq_flowcell AS flowcell
+  ON study.id_study_tmp = flowcell.id_study_tmp
+JOIN sample
+  ON flowcell.id_sample_tmp = sample.id_sample_tmp
+JOIN iseq_product_metrics AS component_metrics
+  ON flowcell.id_iseq_flowcell_tmp = component_metrics.id_iseq_flowcell_tmp
+JOIN iseq_run_status as run_status
+  ON component_metrics.id_run = run_status.id_run
+  AND run_status.iscurrent = 1
+JOIN iseq_run_status_dict as run_status_dict
+  ON run_status.id_run_status_dict = run_status_dict.id_run_status_dict
+JOIN iseq_run_lane_metrics AS run_lane_metrics
+  ON component_metrics.id_run = run_lane_metrics.id_run
+  AND component_metrics.position = run_lane_metrics.position
+JOIN iseq_product_components AS components
+  ON component_metrics.id_iseq_pr_metrics_tmp
+          = components.id_iseq_pr_component_tmp
+  AND components.component_index = 1
+JOIN iseq_product_metrics AS product_metrics
+  ON components.id_iseq_pr_tmp = product_metrics.id_iseq_pr_metrics_tmp
+JOIN seq_product_irods_locations AS irods
+  ON product_metrics.id_iseq_product = irods.id_product
+WHERE run_lane_metrics.qc_complete IS NOT NULL
+  AND product_metrics.num_reads IS NOT NULL
+  AND study.id_lims = "SQSCP"
+  AND study.id_study_lims in ( "$studies" );'];
 
-FROM mlwarehouse.sample
-
-JOIN (mlwarehouse.iseq_flowcell as flowcell,
-    mlwarehouse.iseq_run_status as run_status,
-    mlwarehouse.iseq_product_metrics as product_metrics,
-    mlwarehouse.iseq_run_lane_metrics as run_lane_metrics,
-    iseq_run_status_dict as run_status_dict,
-    mlwarehouse.study as study)
-
-ON (flowcell.id_sample_tmp = sample.id_sample_tmp
-    AND product_metrics.id_iseq_flowcell_tmp = flowcell.id_iseq_flowcell_tmp
-    AND run_status.id_run = product_metrics.id_run
-    AND run_status.id_run = run_lane_metrics.id_run
-    AND run_status.id_run_status_dict = run_status_dict.id_run_status_dict
-    AND flowcell.id_study_tmp = study.id_study_tmp)
-WHERE study.id_study_lims in ( "$studies" ) AND run_status.iscurrent = 1;'];
-# WHERE study.id_study_lims = 6101 AND sample.name = "DTOL_RD8092206" and run_status.iscurrent = 1;'];
-
-
-    my %labels;
-    my %runs;
-    my %run_lane;
-    my %run_merge;
-    open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
-    while(<$sqh>)
-    {
-        next if /public_name/;
-        # awk -F"\t" 'BEGIN{OFS="\t"}$10~/HiSeq/{print "/seq/"$11"/"$11"_"$12"#"$13".cram\t"$0} $10~/NovaSeq/{col=substr($11,0,2); print "/seq/illumina/runs/"col"/"$11"/lane"$12"/plex"$13"/"$11"_"$12"#"$13".cram\t"$0
-        my @F = split /\t/;
-        my $ref = $F[19];
-        @F = (@F[0..18],$F[20]);
-        my $label = "$F[3].$F[9].$F[10].$F[12]"; # name.instument_model.id_run.tag_index[.position]
-        if ($F[9] =~ /NovaSeq/)
-        {
-            if (exists $run_lane{$F[10]}{$F[12]})
-            {
-                if ($run_lane{$F[10]}{$F[12]} eq $label)
-                {
-                    $run_merge{$F[10]}{$F[12]} = 1;
-                }
-            }
-            else
-            {
-                $run_lane{$F[10]}{$F[12]} = $label;
-                $run_merge{$F[10]}{$F[12]} = 0;
-            }
-            if ($ref =~ /\S+/ && $ref ne 'NULL')
-            {
-                $run_merge{$F[10]}{$F[12]} = 0;
-            }
-        }
-        $labels{"$label.$F[11]"} = \@F;
-    }
-    close($sqh);
-    foreach my $run (sort keys %run_merge)
-    {
-        foreach my $lane (sort keys %{$run_merge{$run}})
-        {
-            if ($run_merge{$run}{$lane} == 0)
-            {
-                foreach my $lane (sort keys %{$run_merge{$run}})
-                {
-                    $run_merge{$run}{$lane} = 0;
-                }
-                last;
-            }
-        }
-    }
-
-    my $files;
     my $mlims = qq[$$opts{base}.lims.tsv];
     open(my $fh, "| sort -k1,1V  >$mlims.part") || die("Could not open file for writing [$mlims.part]");
-    foreach my $val (sort values %labels)
+    open(my $sqh, "$cmd | grep -v phiX | ") || die("Could not open mysql command [$cmd]");
+    while(<$sqh>)
     {
-        my $file;
-        my @F = @$val;
-        if ($F[9] =~ /[HM]iSeq/)
-        {
-            $file = qq[/seq/$F[10]/$F[10]_$F[11]#$F[12].cram];
-        }
-        elsif ($F[9] =~ /NovaSeq/)
-        {
-            my $col = substr($F[10], 0, 2);
-            if ($F[11] eq 'NULL' || $run_merge{$F[10]}{$F[12]} == 1)
-            {
-                $file = qq[/seq/illumina/runs/$col/$F[10]/plex$F[12]/$F[10]#$F[12].cram];
-            }
-            else
-            {
-                $file = qq[/seq/illumina/runs/$col/$F[10]/lane$F[11]/plex$F[12]/$F[10]_$F[11]#$F[12].cram];
-            }
-        }
-        else
-        {
-            die("Unknown Illumina platform [$F[9]]");
-        }
-        next if (exists $$files{$file});
-        $$files{$file} = 1;
-        print $fh join("\t", $file, @F);
+        next if /^irods_path/;
+        my @F = split /\t/;
+        my $path = shift @F;
+        $path =~ s/\/$//;
+        $F[0] = "$path/$F[0]";
+        print $fh join "\t", @F;
     }
     close($sqh);
     close($fh);
-
     # clean up $mlims.part file if identical
     system(qq[cmp --silent $mlims $mlims.part && rm $mlims.part]) if (-s qq[$mlims.part]);
 }
@@ -290,13 +228,13 @@ sub update_tracking_info
             }
             if ($F[0] eq 'NULL' || $F[5] !~ /^SAM/)
             {
-                my @wh_info = get_wh_sample_info($F[3]);
+                # my @wh_info = get_wh_sample_info($F[3]);
                 $$wh2{$bam}{info} = 1;
-                if ($wh_info[0]) { $F[0] = $wh_info[0] unless ($F[0] ne 'NULL'); }
-                if ($wh_info[1]) { $F[1] = $wh_info[1] unless ($F[1] ne 'NULL'); }
-                if ($wh_info[2]) { $F[4] = $wh_info[2] unless ($F[4] ne 'NULL'); }
-                if ($wh_info[3]) { $F[5] = $wh_info[3] unless ($F[5] ne 'NULL'); }
-                if ($wh_info[4]) { $F[6] = $wh_info[4] unless ($F[6] ne 'NULL'); }
+                # if ($wh_info[0]) { $F[0] = $wh_info[0] unless ($F[0] ne 'NULL'); }
+                # if ($wh_info[1]) { $F[1] = $wh_info[1] unless ($F[1] ne 'NULL'); }
+                # if ($wh_info[2]) { $F[4] = $wh_info[2] unless ($F[4] ne 'NULL'); }
+                # if ($wh_info[3]) { $F[5] = $wh_info[3] unless ($F[5] ne 'NULL'); }
+                # if ($wh_info[4]) { $F[6] = $wh_info[4] unless ($F[6] ne 'NULL'); }
             }
         }
         my $current_info = join("\t", @F);
@@ -328,18 +266,23 @@ sub update_tracking_info
         }
         close($fh);
         my $diff_txt = `cut -f1,3- $$opts{base}.fofn.diff`;
-        # send_email($$opts{email},"modified metadata for $$opts{label} Illumina data in iRODS", $diff_txt) if ($$opts{email});
+        send_email($$opts{email},"modified metadata for $$opts{label} Illumina data in iRODS", $diff_txt) if ($$opts{email});
     }
     else
     {
         system(qq[rm -f $$opts{base}.fofn.diff]) if (-e "$$opts{base}.fofn.diff");
     }
+    my $ne;
     if ($new)
     {
         foreach my $bam (keys %$new)
         {
             my $check = `ils $bam 2>&1`;
-            delete $$new{$bam} if ($check =~ /ERROR/);
+            if ($check =~ /ERROR/)
+            {
+                $$ne{$bam}++;
+                delete $$new{$bam};
+            }
         }
         if (keys %$new)
         {
@@ -364,8 +307,11 @@ sub update_tracking_info
         my $head = join "\t", qw(file tolid common_name pipeline sample supplier_name biosample biospecimen taxon_id description instrument run_id lane tag tag_seq1 tag_seq2 run_status run_date study_id study manual_qc);
         write_info_to_file($info,"$$opts{base}.fofn.part", $head);
     }
+    if ($ne)
+    {
+        write_info_to_file($ne,"$$opts{base}.fofn.not_exist");
+    }
     system(qq[cmp --silent $$opts{base}.fofn $$opts{base}.fofn.part && rm $$opts{base}.fofn.part]) if (-s qq[$$opts{base}.fofn.part]);
-    system(qq[cmp --silent $$opts{base}.json $$opts{base}.json.part && rm $$opts{base}.json.part]) if (-s qq[$$opts{base}.json.part]);
 }
 
 sub write_info_to_file
