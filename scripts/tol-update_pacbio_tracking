@@ -152,12 +152,12 @@ WHERE study.id_study_lims in ( "$studies" );'];
         s/RUN(\d)/RUN-$1/;
         my @F = split /\t/;
         $F[11]="TRACTION-RUN-$F[11]" if ($F[11]=~/^(\d+)$/ && $F[11]<1000);
-        if ($F[2] eq 'NULL')
-        {
-            my @wh_info = get_wh_sample_info($F[0]);
-            if ($wh_info[3]) { $F[2] = $wh_info[3] if ($F[2] eq 'NULL'); }
-            if ($wh_info[4]) { $F[4] = $wh_info[4] if ($F[4] eq 'NULL'); }
-        }
+        # if ($F[2] eq 'NULL')
+        # {
+        #     my @wh_info = get_wh_sample_info($F[0]);
+        #     if ($wh_info[3]) { $F[2] = $wh_info[3] if ($F[2] eq 'NULL'); }
+        #     if ($wh_info[4]) { $F[4] = $wh_info[4] if ($F[4] eq 'NULL'); }
+        # }
         if ($F[7] =~ /PiMmS/ && $F[15] eq "Pacbio_HiFi\n")
         {
             $F[15] = "Pacbio_HiFi_PiMmS\n";
@@ -233,7 +233,7 @@ sub update_tracking_info
     while(<$fh>)
     {
         chomp;
-        next if (/scraps/ || /removed/ || /unbarcoded/ || /^Binary/ || /unassigned/ || /fail_reads/);
+        next if (/scraps/ || /removed/ || /unbarcoded/ || /^Binary/ || /unassigned/ || /fail_reads/ || /sequencing_control/);
         my ($bam, @F) = split /\t/;
         next unless ($bam =~ /bam$/);
         push(@F,'') unless (scalar @F == 12);
@@ -246,12 +246,12 @@ sub update_tracking_info
             }
             unless ($F[0])
             {
-                my @wh_info = get_wh_sample_info($F[3]);
+                # my @wh_info = get_wh_sample_info($F[3]);
                 $$wh2{$bam}{info} = 1;
-                if ($wh_info[0]) { $F[0] = $wh_info[0] unless ($F[0]); }
-                if ($wh_info[1]) { $F[1] = $wh_info[1] unless ($F[1]); }
-                if ($wh_info[2]) { $F[2] = $wh_info[2] unless ($F[2]); }
-                if ($wh_info[4]) { $F[7] = $wh_info[4] unless ($F[7]); }
+                # if ($wh_info[0]) { $F[0] = $wh_info[0] unless ($F[0]); }
+                # if ($wh_info[1]) { $F[1] = $wh_info[1] unless ($F[1]); }
+                # if ($wh_info[2]) { $F[2] = $wh_info[2] unless ($F[2]); }
+                # if ($wh_info[4]) { $F[7] = $wh_info[4] unless ($F[7]); }
             }
         }
         my $current_info = join("\t", @F);
