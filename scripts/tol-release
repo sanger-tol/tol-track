@@ -80,7 +80,10 @@ my %umbrellas =
     'tol' => 'PRJEB43745',
     '25g' => 'PRJEB33226',
     'badass' => 'PRJEB51690',
-    'erga' => 'PRJEB47820'
+    'erga-pilot' => 'PRJEB47820',
+    'erga-bge' => 'PRJEB61747',
+    'cetacean' => 'PRJNA1020146',
+    'psyche' => 'PRJEB71705',
 );
 
 
@@ -116,6 +119,7 @@ sub error
         "About: Prepare and release BioProjects and raw data for ToL\n",
         "Usage: tol-release study|data [options] <tolid>\n",
         "Options:\n",
+        "   -s, --skip         skip records that already exist\n",
         "   -l, --load         load from informatics spreadsheet\n",
         "   -h, --help         this help message.\n",
         "\n";
@@ -127,12 +131,14 @@ sub parse_params
     my $opts = {
         input => '-',
         study => 0,
+        skip => 0,
         data => 0,
         load => 0,
     };
     while (defined(my $arg=shift(@ARGV)))
     {
         if ( $arg eq 'study' || $arg eq 'data' ) { $$opts{$arg} = 1; next; }
+        if ( $arg eq '-s' || $arg eq '--skip' ) { $$opts{skip} = 1; next; }
         if ( $arg eq '-l' || $arg eq '--load' ) { $$opts{load} = 1; next; }
         if ( $arg eq '-?' || $arg eq '-h' || $arg eq '--help' ) { error(); }
         if (scalar @ARGV == 0) { $$opts{input} = $arg; next; }
@@ -176,6 +182,8 @@ sub get_bioprojects
     else
     {
         my $umbrella = get_projects($data);
+
+        # if ASG, add collaborator text based on the ASG Hub prefix
         if ($umbrella =~ /PRJEB43743/)
         {
             my $specimen = $$data{accession};
@@ -184,9 +192,16 @@ sub get_bioprojects
             {
                 $collab = $specimen;
             }
-            # TODO: get ERGA collaborators from Biosample records
         }
-        print STDERR qq[WARN: existing bioproject for '$tolpre': '$$bioprojects{$tolpre}{UMBRELLA_ACC}'\n] if (exists $$bioprojects{$tolpre});
+        # TODO: if DToL and tolid ~ /^il/ add to Psyche (if not already); warn if not DToL
+        # TODO: if DToL and order eq 'Cetacea' add to CGP (if not already); warn if not DToL
+        # TODO: if ERGA, get collaborators from Biosample records
+
+        if (exists $$bioprojects{$tolpre})
+        {
+            return if $$opts{skip};
+            print STDERR qq[WARN: existing bioproject for '$tolpre': '$$bioprojects{$tolpre}{UMBRELLA_ACC}'\n] if $$bioprojects{$tolpre}{UMBRELLA_ACC};
+        }
         # TOLID   ASM_ACC SPECIES COMMONNAME  COLLABORATOR    TAXID   PARENT_ACC  DATA_ACC    UMBRELLA_ACC    COBIONT_ACC
         my @record = ($tolpre, '', $$data{species}, $$data{common_name}, $collab, $$data{taxon_id}, $umbrella, '', '', '');
         print join "\t", @record;
