@@ -27,6 +27,7 @@ use warnings;
 use DateTime;
 use Cwd;
 use File::Basename;
+use JSON;
 
 my $dt = DateTime->now;
 my $date = $dt->ymd('');
@@ -57,6 +58,8 @@ if (-t STDIN)
     print qq[\n];
     exit;
 }
+
+my $mags = '';
 
 # For ASG, we use the prefix of the hub that supplied the sample to add the collaborator text and link to the ASG website describing the hub
 my %collab_map = (
@@ -107,17 +110,55 @@ $descriptions{'PRJEB47820,PRJEB43745'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJEB47820,PRJNA489243'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJEB40665,PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB40665,PRJEB47820'};
 $descriptions{'PRJEB40665,PRJEB43743'} = $descriptions{'PRJEB40665'};
+$descriptions{'PRJEB40665,PRJNA489243,PRJNA1020146'} = $descriptions{'PRJEB40665,PRJNA489243'};
+
+$descriptions{'PRJEB47820,PRJNA1020146,PRJNA489243'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB43745,PRJNA489243'} = $descriptions{'PRJEB43745'};
 
 while (<>)
 {
     chomp;
     next if /^#/;
-    my ($tolid,$asms,$sp,$common,$collab,$taxid,$projects,$data,$umbrella) = split /\t/;
+    my ($tolid,$asms,$sp,$common,$collab,$taxid,$projects,$data,$umbrella,$cobionts) = split /\t/;
     $data = '' unless ($data);
     $umbrella = '' unless ($umbrella);
+    $cobionts = '' unless ($cobionts);
+
+    my @cobiont_projects = ();
+    my $mag = '';
+    if ($cobionts)
+    {
+        foreach my $prj (split /,/, $cobionts)
+        {
+            if ($prj =~ /PRJ/)
+            {
+                push @cobiont_projects, $prj;
+            }
+            else
+            {
+                $mags = load_mags() unless ($mags);
+                if (exists $$mags{"$prj.metagenome"})
+                {
+                    my $info = $$mags{"$prj.metagenome"}->[0];
+                    my $mag_prj = `echo "$sp\\t$common\\t$projects\\t$$info{tolid}\\t$$info{taxname}\\t$$info{taxid}" | tol-register-list-metagenome`;
+                    chomp $mag_prj;
+                    push @cobiont_projects, $mag_prj;
+                    $mag++;
+                }
+                else
+                {
+                    print STDERR qq[Cobiont project ID [$prj] is not at PRJ project or ToLID with metagenome metadata available... skipping\n];
+                    next;
+                }
+            }
+        }
+        $cobionts = join ",", @cobiont_projects;
+    }
 
     my $spu =$sp;
     $spu =~ s/ /_/g;
+    $spu =~ s/'//g;
 
     unless (exists $descriptions{$projects} && $descriptions{$projects})
     {
@@ -173,11 +214,23 @@ while (<>)
         system(qq[cp $template_dir/template.submission.add.xml $spu/$spu.data.$date.submission.xml]);
     }
 
-    $data = `tol-register-ena-bioprojects --no_test --prefix $spu/$spu.data.$date`;
-    chomp $data;
+    unless ($data && $mag)
+    {
+        $data = `tol-register-ena-bioprojects --no_test --prefix $spu/$spu.data.$date`;
+        chomp $data;
+    }
 
-    $umbrella = `echo "$tolid\\t$asms\\t$sp\\t$common\\t$collab\\t$taxid\\t$projects\\t$data\\t$umbrella" | tol-register-list-umbrella`;
+    $umbrella = `echo "$tolid\\t$asms\\t$sp\\t$common\\t$collab\\t$taxid\\t$projects\\t$data\\t$umbrella\\t$cobionts" | tol-register-list-umbrella`;
     chomp $umbrella;
 
-    print qq[$tolid\t$asms\t$sp\t$common\t$collab\t$taxid\t$projects\t$data\t$umbrella\n];
+    print qq[$tolid\t$asms\t$sp\t$common\t$collab\t$taxid\t$projects\t$data\t$umbrella\t$cobionts\n];
+}
+
+exit;
+
+sub load_mags
+{
+    my $mags_json = `s3cmd get --quiet s3://tolqc/metagenome/hash.json -`;
+    my $mags = decode_json($mags_json);
+    return $mags;
 }

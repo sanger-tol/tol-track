@@ -81,17 +81,24 @@ $descriptions{'PRJEB47820,PRJEB43745'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJEB47820,PRJNA489243'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJEB40665,PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB40665,PRJEB47820'};
 $descriptions{'PRJEB40665,PRJEB43743'} = $descriptions{'PRJEB40665'};
+$descriptions{'PRJEB40665,PRJNA489243,PRJNA1020146'} = $descriptions{'PRJEB40665,PRJNA489243'};
+
+$descriptions{'PRJEB47820,PRJNA1020146,PRJNA489243'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB43745,PRJNA489243'} = $descriptions{'PRJEB43745'};
 
 while (<>)
 {
     chomp;
     next if /^#/;
-    my ($tolid,$asms,$sp,$common,$collab,$taxid,$projects,$data,$umbrella, $cobionts) = split /\t/;
+    my ($tolid,$asms,$sp,$common,$collab,$taxid,$projects,$data,$umbrella,$cobionts) = split /\t/;
     $data = '' unless ($data);
     $umbrella = '' unless ($umbrella);
 
     my $spu =$sp;
     $spu =~ s/ /_/g;
+    $spu =~ s/'//g;
+
     my @children = $asms ? split /,/, $asms : ();
     push @children, $data if ($data);
     my @parents = $projects ? split /,/, $projects : ();

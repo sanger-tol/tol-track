@@ -1,0 +1,164 @@
+#!/usr/bin/env perl
+#
+#    Copyright (C) 2024 Genome Research Ltd.
+#
+#    Author: Shane McCarthy <sm15@sanger.ac.uk>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+use strict;
+use warnings;
+use DateTime;
+use Cwd;
+use File::Basename;
+
+my $dt = DateTime->now;
+my $date = $dt->ymd('');
+
+my $script_dir = dirname Cwd::abs_path(__FILE__);
+my $template_dir = qq[$script_dir/../templates];
+
+chdir(qq[$ENV{TOLQCROOT}/sub/bioprojects]);
+
+if (-t STDIN)
+{
+    print qq[\n];
+    print qq[Usage: tol-register-bioprojects-list-metagenome <tsv>\n];
+    print qq[\n];
+    print qq[Description: Script will register or update ToL BioProjects with the ENA\n];
+    print qq[Input is expected to be a TSV read from a file or STDIN with the folling columns:\n];
+    print qq[\n];
+    print qq[  1.  TOLID: \n];
+    print qq[  2.  TAXNAME: The species scientific name (required)\n];
+    print qq[  3.  TAXID: The species NCBI taxon ID (required)\n];
+    print qq[\n];
+    exit;
+}
+
+# default discription text
+my %descriptions = (
+    # EBP
+    'PRJNA533106' => '',
+    # DToL
+    'PRJEB40665' => 'This project provides the SPECIES assembly of HOSTSPECIES, common name HOSTCOMMONNAME. It contains the full unbinned assembly of HOSTSPECIES and associated organisms plus the MAGs and bins derived from this assembly. The assembly is provided as part of the Darwin Tree of Life Project (https://www.darwintreeoflife.org/). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https: //www.darwintreeoflife.org/project-resources/).',
+    # VGP
+    'PRJNA489243' => '',
+    # DToL/VGP
+    'PRJEB40665,PRJNA489243' => '',
+    # ASG
+    'PRJEB43743' => 'This project provides the SPECIES assembly of HOSTSPECIES, common name HOSTCOMMONNAME. It contains the full unbinned assembly of HOSTSPECIES and associated organisms plus the MAGs and bins derived from this assembly. The assembly is provided by the Aquatic Symbiosis Genomics Project (https: //www.aquaticsymbiosisgenomics.org/). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https: //www.darwintreeoflife.org/project-resources/).',
+    # ToL
+    'PRJEB43745' => 'This project provides the SPECIES assembly of HOSTSPECIES, common name HOSTCOMMONNAME. It contains the full unbinned assembly of HOSTSPECIES and associated organisms plus the MAGs and bins derived from this assembly. The assembly is provided by the Wellcome Sanger Institute Tree of Life Programme (https://www.sanger.ac.uk/programme/tree-of-life/). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https: //www.darwintreeoflife.org/project-resources/).',
+    # 25G
+    'PRJEB33226' => '',
+    # BAdASS
+    'PRJEB51690' => '',
+    # ERGA Pilot
+    'PRJEB47820' => 'This project provides the SPECIES assembly of HOSTSPECIES, common name HOSTCOMMONNAME. It contains the full unbinned assembly of HOSTSPECIES and associated organisms plus the MAGs and bins derived from this assembly. The assembly is provided as part of the European Reference Genomes Atlas Pilot Project (https://www.erga-biodiversity.eu/pilot-project). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https: //www.darwintreeoflife.org/project-resources/).',
+    # DToL/ERGA Pilot
+    'PRJEB40665,PRJEB47820' => '',
+    # DToL/ASG overlap
+    'PRJEB40665,PRJEB43743' => '',
+);
+
+$descriptions{'PRJEB47820,PRJEB43745,PRJNA489243'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB47820,PRJEB43745'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB47820,PRJNA489243'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB40665,PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB40665,PRJEB47820'};
+$descriptions{'PRJEB40665,PRJEB43743'} = $descriptions{'PRJEB40665'};
+$descriptions{'PRJEB40665,PRJNA489243,PRJNA1020146'} = $descriptions{'PRJEB40665,PRJNA489243'};
+
+while (<>)
+{
+    chomp;
+    next if /^#/;
+    my ($sp,$common,$projects,$magtolid,$magsp,$magtaxid,$metagenome) = split /\t/;
+    $projects = '' unless ($projects);
+    $metagenome = '' unless ($metagenome);
+
+    my $spu =$sp;
+    $spu =~ s/ /_/g;
+    $spu =~ s/'//g;
+
+    unless (exists $descriptions{$projects} && $descriptions{$projects})
+    {
+        print STDERR qq[No description setup for projects [$projects]... skipping\n];
+        next;
+    }
+
+    # <PROJECT_SET>
+    #   <PROJECT IDENTIFIER>
+    #   <NAME>TOLID</NAME>
+    #   <TITLE>HOSTSPECIES (HOSTCOMMONNAME) SPECIES assembly, TOLID</TITLE>
+    #   <DESCRIPTION>PROJECTDESCRIPTION</DESCRIPTION>
+    #   <SUBMISSION_PROJECT>
+    #     <SEQUENCING_PROJECT />
+    #     <ORGANISM>
+    #       <TAXON_ID>TAXID</TAXON_ID>
+    #       <SCIENTIFIC_NAME>SPECIES</SCIENTIFIC_NAME>
+    #     </ORGANISM>
+    #     </SUBMISSION_PROJECT>
+    #   </PROJECT>
+    # </PROJECT_SET>
+
+    my $template = qq[$template_dir/template.metagenome.xml];
+    my $txt = `cat $template`;
+    $txt =~ s/PROJECTDESCRIPTION/$descriptions{$projects}/g;
+    if ($metagenome)
+    {
+        $txt =~ s/IDENTIFIER/accession="$metagenome"/;
+    }
+    else
+    {
+        $txt =~ s/IDENTIFIER/alias="ena-tol-$magtolid-study-$date"/;
+    }
+    $txt =~ s/HOSTSPECIES/$sp/g;
+    $txt =~ s/SPECIES/$magsp/g;
+    $txt =~ s/DATE/$date/g;
+    $txt =~ s/TOLID/$magtolid/g;
+    if ($common)
+    {
+        $txt =~ s/HOSTCOMMONNAME/$common/g;
+    }
+    else
+    {
+        $txt =~ s/, common name HOSTCOMMONNAME,//g;
+        $txt =~ s/, common name HOSTCOMMONNAME//g;
+        $txt =~ s/ \(HOSTCOMMONNAME\)//g;
+    }
+    $txt =~ s/TAXID/$magtaxid/g;
+
+    system(qq[mkdir -p $spu]);
+    open(my $fh, ">$spu/$spu.$magtolid.$date.xml") || die("Could not write to $spu/$spu.$magtolid.$date.xml");
+    print $fh $txt;
+    close($fh);
+    if ($metagenome)
+    {
+        system(qq[cp $template_dir/template.submission.modify.xml $spu/$spu.$magtolid.$date.submission.xml]);
+    }
+    else
+    {
+        system(qq[cp $template_dir/template.submission.add.xml $spu/$spu.$magtolid.$date.submission.xml]);
+    }
+
+    $metagenome = `tol-register-ena-bioprojects --no_test --prefix $spu/$spu.$magtolid.$date`;
+    chomp $metagenome;
+    print "$metagenome";
+    print STDERR "$magtolid\t$metagenome\n";
+}
