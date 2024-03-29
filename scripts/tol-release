@@ -84,6 +84,7 @@ my %umbrellas =
     'erga-bge' => 'PRJEB61747',
     'cetacean' => 'PRJNA1020146',
     'psyche' => 'PRJEB71705',
+    'bat1k' => 'PRJNA489245',
 );
 
 
@@ -193,8 +194,6 @@ sub get_bioprojects
                 $collab = $specimen;
             }
         }
-        # TODO: if DToL and tolid ~ /^il/ add to Psyche (if not already); warn if not DToL
-        # TODO: if DToL and order eq 'Cetacea' add to CGP (if not already); warn if not DToL
         # TODO: if ERGA, get collaborators from Biosample records
 
         if (exists $$bioprojects{$tolpre})
@@ -267,7 +266,7 @@ sub get_raw_data
 sub get_projects
 {
     my ($data) = @_;
-    my @projects = ();
+    my %projects = ();
     while (my ($key, $value) = each %$data)
     {
         if ($key =~ /^project/ && $value eq '1')
@@ -275,11 +274,74 @@ sub get_projects
             my ($proj) = $key =~ m/project\.(\S+)$/;
             if (exists $umbrellas{$proj})
             {
-                push @projects, $umbrellas{$proj};
+                $projects{$umbrellas{$proj}}++;
             }
         }
     }
-    return join ',', sort @projects;
+
+    # Below are rules to add to certain projects based on a set of broad rules
+    # Warnings are given to alert user in case they wish to override these rules
+
+    # if DToL and tolid ~ /^il/ add to Psyche (if not already); warn if not DToL
+    if ($$data{tolid} =~ /^il/ && !exists $projects{$umbrellas{psyche}})
+    {
+        if (exists $projects{$umbrellas{darwin}})
+        {
+            $projects{$umbrellas{psyche}}++;
+            print STDERR "WARN: Adding DToL Lepidoptera $$data{tolid} to Psyche\n";
+        }
+        else
+        {
+            print STDERR "WARN: Lepidoptera $$data{tolid} not automatically added to Psyche as not DToL\n";
+        }
+    }
+
+    # if DToL and order eq 'Cetacea' add to CGP (if not already); warn if not DToL
+    if ($$data{order} eq 'Cetacea' && !exists $projects{$umbrellas{cetacean}})
+    {
+        if (exists $projects{$umbrellas{darwin}})
+        {
+            $projects{$umbrellas{cetacean}}++;
+            print STDERR "WARN: Adding DToL Cetacean $$data{tolid} to Cetacean Genome Project\n";
+        }
+        else
+        {
+            print STDERR "WARN: Cetacean $$data{tolid} not automatically added to Cetacean Genome Project as not DToL\n";
+        }
+
+    }
+
+    # if DToL and order eq 'Chiroptera' add to Bat1K (if not already); warn if not DToL
+    if ($$data{order} eq 'Chiroptera' && !exists $projects{$umbrellas{bat1k}})
+    {
+        if (exists $projects{$umbrellas{darwin}})
+        {
+            $projects{$umbrellas{bat1k}}++;
+            print STDERR "WARN: Adding DToL Chiropteran $$data{tolid} to Bat1K\n";
+        }
+        else
+        {
+            print STDERR "WARN: Chiropteran $$data{tolid} not automatically added to Bat1K as not DToL\n";
+        }
+
+    }
+
+    # if DToL and phylum eq 'Chordata' add to VGP (if not already); warn if not DToL
+    if ($$data{phylum} eq 'Chordata' && !exists $projects{$umbrellas{vgp}})
+    {
+        if (exists $projects{$umbrellas{vgp}})
+        {
+            $projects{$umbrellas{vgp}}++;
+            print STDERR "WARN: Adding DToL Chordate $$data{tolid} to VGP\n";
+        }
+        else
+        {
+            print STDERR "WARN: Chordate $$data{tolid} not automatically added to VGP as not DToL\n";
+        }
+
+    }
+
+    return join ',', sort keys %projects;
 }
 
 sub read_data

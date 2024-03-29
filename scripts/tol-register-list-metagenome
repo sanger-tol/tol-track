@@ -84,6 +84,13 @@ $descriptions{'PRJEB40665,PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB40665,P
 $descriptions{'PRJEB40665,PRJEB43743'} = $descriptions{'PRJEB40665'};
 $descriptions{'PRJEB40665,PRJNA489243,PRJNA1020146'} = $descriptions{'PRJEB40665,PRJNA489243'};
 
+$descriptions{'PRJEB47820,PRJNA1020146,PRJNA489243'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB47820'};
+$descriptions{'PRJEB43745,PRJNA489243'} = $descriptions{'PRJEB43745'};
+
+$descriptions{'PRJEB40665,PRJEB71705'} = $descriptions{'PRJEB40665'};
+$descriptions{'PRJEB43745,PRJEB71705'} = $descriptions{'PRJEB43745'};
+
 while (<>)
 {
     chomp;
@@ -95,6 +102,8 @@ while (<>)
     my $spu =$sp;
     $spu =~ s/ /_/g;
     $spu =~ s/'//g;
+    $spu =~ s/\(/_/g;
+    $spu =~ s/\)/_/g;
 
     unless (exists $descriptions{$projects} && $descriptions{$projects})
     {

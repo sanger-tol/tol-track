@@ -87,6 +87,9 @@ $descriptions{'PRJEB47820,PRJNA1020146,PRJNA489243'} = $descriptions{'PRJEB47820
 $descriptions{'PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJEB43745,PRJNA489243'} = $descriptions{'PRJEB43745'};
 
+$descriptions{'PRJEB40665,PRJEB71705'} = $descriptions{'PRJEB40665'};
+$descriptions{'PRJEB43745,PRJEB71705'} = $descriptions{'PRJEB43745'};
+
 while (<>)
 {
     chomp;
@@ -98,6 +101,8 @@ while (<>)
     my $spu =$sp;
     $spu =~ s/ /_/g;
     $spu =~ s/'//g;
+    $spu =~ s/\(/_/g;
+    $spu =~ s/\)/_/g;
 
     my @children = $asms ? split /,/, $asms : ();
     push @children, $data if ($data);
