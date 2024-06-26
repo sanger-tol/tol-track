@@ -55,7 +55,7 @@ sub parse_params
         baton => 1,
         baton_metaquery => '/software/npg/current/bin/baton-metaquery',
         baton2tsv => '/nfs/users/nfs_s/sm15/scripts/baton2tsv',
-        samtools => '/software/singularity-v3.6.4/bin/singularity exec -B /lustre:/lustre /software/tola/images/htstools-1.15.1.sif samtools'
+        samtools => '/software/singularity/3.11.4/bin/singularity exec -B /lustre:/lustre /software/tola/images/htstools-1.15.1.sif samtools'
     };
     while (defined(my $arg=shift(@ARGV)))
     {
