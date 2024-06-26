@@ -114,6 +114,7 @@ SELECT irods.irods_root_collection AS irods_path
   , sample.public_name AS tol_specimen_id
   , sample.common_name AS scientific_name
   , flowcell.pipeline_id_lims AS pipeline_id_lims
+  , flowcell.id_library_lims AS library_id
   , sample.name AS sample_name
   , sample.supplier_name AS supplier_name
   , sample.accession_number AS biosample_accession
@@ -121,6 +122,8 @@ SELECT irods.irods_root_collection AS irods_path
   , sample.taxon_id AS taxon_id
   , sample.description AS description
   , run_lane_metrics.instrument_model AS instrument_model
+  , run_lane_metrics.instrument_name AS instrument_name
+  , run_lane_metrics.run_complete AS run_complete
   , CONVERT(product_metrics.id_run, CHAR) AS run_id
   , CONVERT(product_metrics.position, CHAR) AS position
   , CONVERT(product_metrics.tag_index, CHAR) AS tag_index
@@ -266,7 +269,7 @@ sub update_tracking_info
         }
         close($fh);
         my $diff_txt = `cut -f1,3- $$opts{base}.fofn.diff`;
-        send_email($$opts{email},"modified metadata for $$opts{label} Illumina data in iRODS", $diff_txt) if ($$opts{email});
+        # send_email($$opts{email},"modified metadata for $$opts{label} Illumina data in iRODS", $diff_txt) if ($$opts{email});
     }
     else
     {
@@ -304,7 +307,7 @@ sub update_tracking_info
     }
     if ($new || $diff)
     {
-        my $head = join "\t", qw(file tolid common_name pipeline sample supplier_name biosample biospecimen taxon_id description instrument run_id lane tag tag_seq1 tag_seq2 run_status run_date study_id study manual_qc);
+        my $head = join "\t", qw(file tolid common_name pipeline library sample supplier_name biosample biospecimen taxon_id description instrument_model instrument_name run_complete run_id lane tag tag_seq1 tag_seq2 run_status run_date study_id study manual_qc);
         write_info_to_file($info,"$$opts{base}.fofn.part", $head);
     }
     if ($ne)
