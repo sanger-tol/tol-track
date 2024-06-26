@@ -329,7 +329,7 @@ sub get_projects
     # if DToL and phylum eq 'Chordata' add to VGP (if not already); warn if not DToL
     if ($$data{phylum} eq 'Chordata' && !exists $projects{$umbrellas{vgp}})
     {
-        if (exists $projects{$umbrellas{vgp}})
+        if (exists $projects{$umbrellas{darwin}})
         {
             $projects{$umbrellas{vgp}}++;
             print STDERR "WARN: Adding DToL Chordate $$data{tolid} to VGP\n";
