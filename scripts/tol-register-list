@@ -99,6 +99,8 @@ my %descriptions = (
     'PRJEB51690' => 'This project collects the genomic and transcriptomic data generated for the mosquito species SPECIES to facilitate genome assembly and annotation as part of the Anopheles Reference Genomes project. These data (including raw data and assemblies) are released for reuse for any purpose upon deposition in ENA, and we encourage reuse. More information on Sanger’s data release policy can be found here https://www.sanger.ac.uk/about/who-we-are/research-policies/open-access-science/.',
     # ERGA Pilot
     'PRJEB47820' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, as part of the European Reference Genome Atlas Pilot Project (https://www.erga-biodiversity.eu/pilot-project). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/). The assembly is provided by the Wellcome Sanger Institute Tree of Life Programme (https://www.sanger.ac.uk/programme/tree-of-life/) in collaboration with COLLABORATOR.',
+    # ERGA BGE
+    'PRJEB61747' => 'This project collects the genomic and transcriptomic data generated for SPECIES to facilitate genome assembly and annotation as part of the Biodiversity Genomics Europe project (BGE, https://biodiversitygenomics.eu/) and organised by the European Reference Genome Atlas (ERGA, https://www.erga-biodiversity.eu/) initiative.',
     # DToL/ERGA Pilot
     'PRJEB40665,PRJEB47820' => 'This project collects the genomic and transcriptomic data generated for SPECIES, common name COMMONNAME, as part of the European Reference Genome Atlas Pilot Project (https://www.erga-biodiversity.eu/pilot-project) and the Darwin Tree of Life Project (https://www.darwintreeoflife.org/). The data under this project are made available subject to the Tree of Life Open Data Release Policy (https://www.darwintreeoflife.org/project-resources/). The assembly is provided by the Wellcome Sanger Institute Tree of Life Programme (https://www.sanger.ac.uk/programme/tree-of-life/) in collaboration with COLLABORATOR.',
     # DToL/ASG overlap
@@ -111,13 +113,19 @@ $descriptions{'PRJEB47820,PRJNA489243'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJEB40665,PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB40665,PRJEB47820'};
 $descriptions{'PRJEB40665,PRJEB43743'} = $descriptions{'PRJEB40665'};
 $descriptions{'PRJEB40665,PRJNA489243,PRJNA1020146'} = $descriptions{'PRJEB40665,PRJNA489243'};
+$descriptions{'PRJEB40665,PRJNA1020146,PRJNA489243'} = $descriptions{'PRJEB40665,PRJNA489243'};
 
 $descriptions{'PRJEB47820,PRJNA1020146,PRJNA489243'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJNA489243,PRJEB47820'} = $descriptions{'PRJEB47820'};
 $descriptions{'PRJEB43745,PRJNA489243'} = $descriptions{'PRJEB43745'};
 
+# Psyche defaults to DTOL or TOL if also part of those projects
 $descriptions{'PRJEB40665,PRJEB71705'} = $descriptions{'PRJEB40665'};
 $descriptions{'PRJEB43745,PRJEB71705'} = $descriptions{'PRJEB43745'};
+
+# Bat1K defaults to DTOL or TOL if also part of those projects
+$descriptions{'PRJEB40665,PRJNA489243,PRJNA489245'} = $descriptions{'PRJEB40665'};
+$descriptions{'PRJEB43745,PRJNA489243,PRJNA489245'} = $descriptions{'PRJEB43745'};
 
 
 while (<>)
@@ -160,11 +168,10 @@ while (<>)
         $cobionts = join ",", @cobiont_projects;
     }
 
-    my $spu =$sp;
-    $spu =~ s/ /_/g;
-    $spu =~ s/'//g;
-    $spu =~ s/\(/_/g;
-    $spu =~ s/\)/_/g;
+    my $spu = $sp;
+    $spu =~ s/\W//g;
+    $spu =~ s/_$//g;
+    $spu =~ s/_+/_/g;
 
     unless (exists $descriptions{$projects} && $descriptions{$projects})
     {

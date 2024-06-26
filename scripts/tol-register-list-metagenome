@@ -99,11 +99,10 @@ while (<>)
     $projects = '' unless ($projects);
     $metagenome = '' unless ($metagenome);
 
-    my $spu =$sp;
-    $spu =~ s/ /_/g;
-    $spu =~ s/'//g;
-    $spu =~ s/\(/_/g;
-    $spu =~ s/\)/_/g;
+    my $spu = $sp;
+    $spu =~ s/\W//g;
+    $spu =~ s/_$//g;
+    $spu =~ s/_+/_/g;
 
     unless (exists $descriptions{$projects} && $descriptions{$projects})
     {
