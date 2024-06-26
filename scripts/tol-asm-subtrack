@@ -87,6 +87,7 @@ sub load_subtrack
     $load{ilAphHype}->{asm}->{PRJEB36756} = 1;
     my $cmd = qq[mysql -u$ENV{SUBTRACK_USER} -h $ENV{SUBTRACK_HOST} -P$ENV{SUBTRACK_PORT} $ENV{SUBTRACK_DATABASE} -se '
 select ebi_study_acc,name from assembly_info where analysis_type = "ASSE";'];
+# select ebi_study_acc,name from assembly_info;'];
     open(my $sqh, "$cmd |") || die("Could not open mysql command [$cmd]");
     while(<$sqh>)
     {
@@ -110,7 +111,7 @@ select ebi_study_acc,name from assembly_info where analysis_type = "ASSE";'];
             next;
         }
         next unless ($tolpre);
-        if (!$type || $type =~ /alternate/ || $type =~ /paternal/ || $type =~ /maternal/ || $type =~ /chloroplast/ || $type =~ /mitochondrion/ || $type =~ /^\d+$/)
+        if (!$type || $type =~ /alternate/ || $type =~ /hap\d+/ || $type =~ /paternal/ || $type =~ /maternal/ || $type =~ /chloroplast/ || $type =~ /mitochondrion/ || $type =~ /^\d+$/)
         {
             if ($type =~ /_sp_/)
             {
